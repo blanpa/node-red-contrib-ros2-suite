@@ -1,0 +1,93 @@
+<script type="text/javascript">
+RED.nodes.registerType('ros2-browse', {
+    category: 'ROS 2',
+    color: '#4b8bbe',
+    defaults: {
+        name: { value: '' },
+        connection: { value: '', type: 'ros2-connection' },
+        what: { value: 'topics' },
+        rosType: { value: '' },
+        kind: { value: 'msg' }
+    },
+    inputs: 1,
+    outputs: 1,
+    icon: 'font-awesome/fa-sitemap',
+    paletteLabel: 'browse',
+    label: function () {
+        return this.name || ('ros2 ' + (this.what === 'template' ? 'template ' + (this.rosType || '') : this.what));
+    },
+    labelStyle: function () {
+        return this.name ? 'node_label_italic' : '';
+    },
+    oneditprepare: function () {
+        $('#node-input-what').on('change', function () {
+            $('.ros2-browse-template').toggle($(this).val() === 'template');
+        }).trigger('change');
+    }
+});
+</script>
+
+<script type="text/html" data-template-name="ros2-browse">
+    <div class="form-row">
+        <label for="node-input-connection"><i class="fa fa-plug"></i> Connection</label>
+        <input type="text" id="node-input-connection">
+    </div>
+    <div class="form-row">
+        <label for="node-input-what"><i class="fa fa-search"></i> List</label>
+        <select id="node-input-what" style="width: 70%">
+            <option value="topics">topics</option>
+            <option value="services">services</option>
+            <option value="actions">actions</option>
+            <option value="nodes">nodes</option>
+            <option value="all">all of the above</option>
+            <option value="template">message template for a type</option>
+        </select>
+    </div>
+    <div class="form-row ros2-browse-template">
+        <label for="node-input-rosType"><i class="fa fa-cube"></i> Type</label>
+        <input type="text" id="node-input-rosType" placeholder="geometry_msgs/msg/Twist (or msg.rosType)">
+    </div>
+    <div class="form-row ros2-browse-template">
+        <label for="node-input-kind"><i class="fa fa-list"></i> Kind</label>
+        <select id="node-input-kind" style="width: 70%">
+            <option value="msg">message</option>
+            <option value="request">service request</option>
+            <option value="response">service response</option>
+            <option value="goal">action goal</option>
+            <option value="result">action result</option>
+            <option value="feedback">action feedback</option>
+        </select>
+    </div>
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name">
+    </div>
+</script>
+
+<script type="text/html" data-help-name="ros2-browse">
+    <p>Lists what the ROS 2 graph offers right now, or builds an example message for a type.</p>
+    <h3>Inputs</h3>
+    <dl class="message-properties">
+        <dt class="optional">payload <span class="property-type">string</span></dt>
+        <dd><code>topics</code>, <code>services</code>, <code>actions</code>, <code>nodes</code>,
+            <code>all</code> or <code>template</code> — overrides the configured choice. Any other payload
+            (e.g. an inject timestamp) just triggers the configured query.</dd>
+        <dt class="optional">rosType <span class="property-type">string</span></dt>
+        <dd>type for <code>template</code>, e.g. <code>turtlesim/srv/TeleportAbsolute</code>.</dd>
+        <dt class="optional">kind <span class="property-type">string</span></dt>
+        <dd>for <code>template</code>: <code>msg</code>, <code>request</code>, <code>response</code>,
+            <code>goal</code>, <code>result</code> or <code>feedback</code>.</dd>
+    </dl>
+    <h3>Outputs</h3>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">array | object</span></dt>
+        <dd><code>topics</code>/<code>services</code>/<code>actions</code>: <code>[{name, type}]</code>;
+            <code>nodes</code>: <code>[name]</code>; <code>all</code>: <code>{topics, services, actions, nodes}</code>;
+            <code>template</code>: a complete message with default values.</dd>
+        <dt>ros <span class="property-type">object</span></dt>
+        <dd><code>{what, at}</code></dd>
+    </dl>
+    <h3>Details</h3>
+    <p>Everything comes from rosapi, which the standard rosbridge launch file starts. Lists are cached
+       for 5 s. Action types are derived from each action's feedback topic.</p>
+</script>

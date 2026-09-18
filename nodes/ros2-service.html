@@ -1,0 +1,148 @@
+<script type="text/javascript">
+RED.nodes.registerType('ros2-service', {
+    category: 'ROS 2',
+    color: '#4b8bbe',
+    defaults: {
+        name: { value: '' },
+        connection: { value: '', type: 'ros2-connection' },
+        mode: { value: 'client' },
+        service: { value: '' },
+        rosType: { value: '' },
+        timeout: { value: '', validate: RED.validators.number(true) },
+        validation: { value: 'warn' },
+        allowOverride: { value: false }
+    },
+    inputs: 1,
+    outputs: 1,
+    icon: 'swap.svg',
+    paletteLabel: 'service',
+    label: function () {
+        var prefix = this.mode === 'server' ? '⇐ ' : '';
+        return this.name || (this.service ? prefix + this.service : 'ros2 service');
+    },
+    labelStyle: function () {
+        return this.name ? 'node_label_italic' : '';
+    },
+    inputLabels: function () {
+        return this.mode === 'server' ? 'response (msg with _ros2)' : 'request';
+    },
+    outputLabels: function () {
+        return this.mode === 'server' ? 'incoming request' : 'response';
+    },
+    oneditprepare: function () {
+        var $type = $('#node-input-rosType');
+        var $hint = $('#ros2-service-hint');
+        var $mode = $('#node-input-mode');
+        ROS2Suite.attachAutocomplete($('#node-input-service'), 'services', ROS2Suite.connId,
+            ROS2Suite.typeDetector($type, $hint, 'service'), $hint);
+        var detected = function () { return $type.val() || ($type.attr('placeholder') !== 'auto-detect' && $type.attr('placeholder')); };
+        ROS2Suite.attachTemplateButton($('#ros2-service-template-btn'), $('#ros2-service-template'), ROS2Suite.connId,
+            detected, $mode.val() === 'server' ? 'response' : 'request');
+        $mode.on('change', function () {
+            var server = $mode.val() === 'server';
+            $('.ros2-service-client-only').toggle(!server);
+            $('#ros2-service-timeout-label').text(server ? 's until an unanswered request fails' : 's (empty = connection default)');
+            $('#ros2-service-template-btn').off('click');
+            ROS2Suite.attachTemplateButton($('#ros2-service-template-btn'), $('#ros2-service-template'), ROS2Suite.connId,
+                detected, server ? 'response' : 'request');
+        }).trigger('change');
+    }
+});
+</script>
+
+<script type="text/html" data-template-name="ros2-service">
+    <div class="form-row">
+        <label for="node-input-connection"><i class="fa fa-plug"></i> Connection</label>
+        <input type="text" id="node-input-connection">
+    </div>
+    <div class="form-row">
+        <label for="node-input-mode"><i class="fa fa-exchange"></i> Mode</label>
+        <select id="node-input-mode" style="width: 70%">
+            <option value="client">client — call a ROS service</option>
+            <option value="server">server — provide a ROS service from this flow</option>
+        </select>
+    </div>
+    <div class="form-row">
+        <label for="node-input-service"><i class="fa fa-bell"></i> Service</label>
+        <input type="text" id="node-input-service" placeholder="/turtle1/teleport_absolute" autocomplete="off">
+        <span id="ros2-service-hint" class="ros2-hint"></span>
+    </div>
+    <div class="form-row">
+        <label for="node-input-rosType"><i class="fa fa-cube"></i> Type</label>
+        <input type="text" id="node-input-rosType" placeholder="auto-detect" style="width: 55%">
+        <button id="ros2-service-template-btn" class="red-ui-button" title="show and copy an example request/response">
+            <i class="fa fa-file-code-o"></i> template
+        </button>
+        <pre id="ros2-service-template" class="ros2-template"></pre>
+    </div>
+    <div class="form-row">
+        <label for="node-input-timeout"><i class="fa fa-clock-o"></i> Timeout</label>
+        <input type="text" id="node-input-timeout" style="width: 70px"> <span id="ros2-service-timeout-label"></span>
+    </div>
+    <div class="form-row">
+        <label for="node-input-validation"><i class="fa fa-check-square-o"></i> Validate</label>
+        <select id="node-input-validation" style="width: 70%">
+            <option value="strict">strict — invalid request/response fails</option>
+            <option value="warn">warn — log problems, continue</option>
+            <option value="off">off — no checks</option>
+        </select>
+    </div>
+    <div class="form-row ros2-service-client-only">
+        <input type="checkbox" id="node-input-allowOverride" style="display: inline-block; width: auto; vertical-align: top; margin-left: 105px;">
+        <label for="node-input-allowOverride" style="width: auto;">msg.service overrides the configured service</label>
+    </div>
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name">
+    </div>
+</script>
+
+<script type="text/html" data-help-name="ros2-service">
+    <p>Calls a ROS 2 service (<b>client</b> mode) or provides one from a flow (<b>server</b> mode).</p>
+
+    <h3>Client mode</h3>
+    <h4>Inputs</h4>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">object</span></dt>
+        <dd>the request, e.g. <code>{"x": 5.5, "y": 5.5, "theta": 0}</code> for
+            <code>turtlesim/srv/TeleportAbsolute</code>. Empty means a default request.</dd>
+        <dt class="optional">service <span class="property-type">string</span></dt>
+        <dd>used when no service is configured, or when overriding is enabled.</dd>
+        <dt class="optional">rosType <span class="property-type">string</span></dt>
+        <dd>service type, overrides the configured / detected type.</dd>
+    </dl>
+    <h4>Outputs</h4>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">object</span></dt>
+        <dd>the response.</dd>
+        <dt>ros <span class="property-type">object</span></dt>
+        <dd><code>{service, type, durationMs}</code></dd>
+    </dl>
+    <p>Failures (service missing, timeout, rosbridge error) go to Catch nodes via <code>done(err)</code>.
+       For a missing service the error lists similar service names.</p>
+
+    <h3>Server mode</h3>
+    <p>The node advertises the service on the ROS side. Each incoming request is emitted as a
+       message; process it and wire the end of the flow <b>back into this same node</b>.</p>
+    <h4>Outputs</h4>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">object</span></dt>
+        <dd>the request arguments.</dd>
+        <dt>ros <span class="property-type">object</span></dt>
+        <dd><code>{service, type, requestId}</code></dd>
+        <dt>_ros2 <span class="property-type">object</span></dt>
+        <dd><code>{replyTo, requestId}</code> — keep it on the message, it routes the reply.</dd>
+    </dl>
+    <h4>Inputs</h4>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">object</span></dt>
+        <dd>the response, e.g. <code>{"success": true, "message": "done"}</code> for
+            <code>std_srvs/srv/Trigger</code>.</dd>
+        <dt class="optional">error <span class="property-type">string</span></dt>
+        <dd>answer with a failure instead. rosbridge has no error text for provided services, so the ROS
+            caller sees a failed call (or a default response, depending on the rosbridge version); the
+            error is logged here.</dd>
+    </dl>
+    <p>The type is required in server mode. Requests the flow does not answer within the timeout
+       are answered with a failure. The service is re-advertised automatically after a reconnect.</p>
+</script>

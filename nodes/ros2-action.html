@@ -1,0 +1,130 @@
+<script type="text/javascript">
+RED.nodes.registerType('ros2-action', {
+    category: 'ROS 2',
+    color: '#4b8bbe',
+    defaults: {
+        name: { value: '' },
+        connection: { value: '', type: 'ros2-connection' },
+        action: { value: '' },
+        rosType: { value: '' },
+        timeout: { value: 0, validate: RED.validators.number(true) },
+        concurrent: { value: false },
+        validation: { value: 'warn' },
+        allowOverride: { value: false }
+    },
+    inputs: 1,
+    outputs: 3,
+    icon: 'font-awesome/fa-flag-checkered',
+    paletteLabel: 'action',
+    label: function () {
+        return this.name || this.action || 'ros2 action';
+    },
+    labelStyle: function () {
+        return this.name ? 'node_label_italic' : '';
+    },
+    inputLabels: ['goal / cancel'],
+    outputLabels: ['feedback', 'result', 'status events'],
+    oneditprepare: function () {
+        var $type = $('#node-input-rosType');
+        var $hint = $('#ros2-action-hint');
+        ROS2Suite.attachAutocomplete($('#node-input-action'), 'actions', ROS2Suite.connId,
+            ROS2Suite.typeDetector($type, $hint, 'action server'), $hint);
+        ROS2Suite.attachTemplateButton($('#ros2-action-template-btn'), $('#ros2-action-template'), ROS2Suite.connId,
+            function () { return $type.val() || ($type.attr('placeholder') !== 'auto-detect' && $type.attr('placeholder')); }, 'goal');
+    }
+});
+</script>
+
+<script type="text/html" data-template-name="ros2-action">
+    <div class="form-row">
+        <label for="node-input-connection"><i class="fa fa-plug"></i> Connection</label>
+        <input type="text" id="node-input-connection">
+    </div>
+    <div class="form-row">
+        <label for="node-input-action"><i class="fa fa-flag-checkered"></i> Action</label>
+        <input type="text" id="node-input-action" placeholder="/turtle1/rotate_absolute" autocomplete="off">
+        <span id="ros2-action-hint" class="ros2-hint"></span>
+    </div>
+    <div class="form-row">
+        <label for="node-input-rosType"><i class="fa fa-cube"></i> Type</label>
+        <input type="text" id="node-input-rosType" placeholder="auto-detect" style="width: 55%">
+        <button id="ros2-action-template-btn" class="red-ui-button" title="show and copy an example goal">
+            <i class="fa fa-file-code-o"></i> template
+        </button>
+        <pre id="ros2-action-template" class="ros2-template"></pre>
+    </div>
+    <div class="form-row">
+        <label for="node-input-timeout"><i class="fa fa-clock-o"></i> Timeout</label>
+        <input type="text" id="node-input-timeout" style="width: 70px"> s, then cancel the goal (0 = none)
+    </div>
+    <div class="form-row">
+        <input type="checkbox" id="node-input-concurrent" style="display: inline-block; width: auto; vertical-align: top; margin-left: 105px;">
+        <label for="node-input-concurrent" style="width: auto;">allow concurrent goals</label>
+    </div>
+    <div class="form-row">
+        <label for="node-input-validation"><i class="fa fa-check-square-o"></i> Validate</label>
+        <select id="node-input-validation" style="width: 70%">
+            <option value="strict">strict — invalid goals are not sent</option>
+            <option value="warn">warn — log problems, send anyway</option>
+            <option value="off">off — no checks</option>
+        </select>
+    </div>
+    <div class="form-row">
+        <input type="checkbox" id="node-input-allowOverride" style="display: inline-block; width: auto; vertical-align: top; margin-left: 105px;">
+        <label for="node-input-allowOverride" style="width: auto;">msg.action overrides the configured action</label>
+    </div>
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name">
+    </div>
+</script>
+
+<script type="text/html" data-help-name="ros2-action">
+    <p>Sends goals to a ROS 2 action server and reports feedback, result and status.</p>
+    <h3>Inputs</h3>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">object</span></dt>
+        <dd>the goal, e.g. <code>{"theta": 1.57}</code> for <code>turtlesim/action/RotateAbsolute</code>.</dd>
+        <dt class="optional">cancel <span class="property-type">boolean</span></dt>
+        <dd><code>true</code> cancels the goal in <code>msg.goalId</code>, or all running goals of this node.</dd>
+        <dt class="optional">goalId <span class="property-type">string</span></dt>
+        <dd>goal to cancel (from <code>msg.ros.goalId</code> or the status output).</dd>
+        <dt class="optional">action / rosType <span class="property-type">string</span></dt>
+        <dd>override action name (if enabled or not configured) and action type.</dd>
+    </dl>
+    <h3>Outputs</h3>
+    <ol class="node-ports">
+        <li>Feedback
+            <dl class="message-properties">
+                <dt>payload <span class="property-type">object</span></dt><dd>feedback message.</dd>
+                <dt>ros <span class="property-type">object</span></dt><dd><code>{action, type, goalId}</code></dd>
+            </dl>
+        </li>
+        <li>Result
+            <dl class="message-properties">
+                <dt>payload <span class="property-type">object</span></dt><dd>result message.</dd>
+                <dt>ros <span class="property-type">object</span></dt>
+                <dd><code>{action, type, goalId, status, statusCode}</code> — status is
+                    <code>succeeded</code>, <code>aborted</code> or <code>canceled</code>.</dd>
+            </dl>
+        </li>
+        <li>Status events
+            <dl class="message-properties">
+                <dt>payload <span class="property-type">object</span></dt>
+                <dd>always <code>{event, goalId, action, at, status?, error?}</code> with
+                    <code>event</code> one of <code>sent</code>, <code>feedback</code>, <code>succeeded</code>,
+                    <code>aborted</code>, <code>canceled</code>, <code>failed</code>,
+                    <code>cancel-requested</code>. Made for state machines: switch on
+                    <code>payload.event</code>.</dd>
+            </dl>
+        </li>
+    </ol>
+    <p>All outputs carry the properties of the input message, so correlation fields survive.</p>
+    <h3>Details</h3>
+    <p>Without <i>concurrent goals</i>, a new goal while one is running is refused with an error
+       (send <code>msg.cancel</code> first). A timeout cancels the goal and emits <code>failed</code>.
+       <code>failed</code> means the goal never produced a normal result: rejected, timed out, or the
+       connection dropped. It is also reported via <code>done(err)</code> for Catch nodes.</p>
+    <p>rosbridge does not report goal acceptance separately, so there is no <code>accepted</code> event;
+       the first <code>feedback</code> confirms the goal is executing.</p>
+</script>

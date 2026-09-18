@@ -1,0 +1,109 @@
+<script type="text/javascript">
+RED.nodes.registerType('ros2-publish', {
+    category: 'ROS 2',
+    color: '#4b8bbe',
+    defaults: {
+        name: { value: '' },
+        connection: { value: '', type: 'ros2-connection' },
+        topic: { value: '' },
+        rosType: { value: '' },
+        validation: { value: 'strict' },
+        latch: { value: false },
+        allowOverride: { value: false }
+    },
+    inputs: 1,
+    outputs: 1,
+    icon: 'bridge.svg',
+    align: 'right',
+    paletteLabel: 'publish',
+    label: function () {
+        return this.name || this.topic || 'ros2 publish';
+    },
+    labelStyle: function () {
+        return this.name ? 'node_label_italic' : '';
+    },
+    inputLabels: ['message'],
+    outputLabels: ['sent message'],
+    oneditprepare: function () {
+        var $type = $('#node-input-rosType');
+        var $hint = $('#ros2-publish-hint');
+        ROS2Suite.attachAutocomplete($('#node-input-topic'), 'topics', ROS2Suite.connId,
+            ROS2Suite.typeDetector($type, $hint, 'topic'), $hint);
+        ROS2Suite.attachTemplateButton($('#ros2-publish-template-btn'), $('#ros2-publish-template'),
+            ROS2Suite.connId, function () { return $type.val() || ($type.attr('placeholder') !== 'auto-detect' && $type.attr('placeholder')); }, 'msg');
+    }
+});
+</script>
+
+<script type="text/html" data-template-name="ros2-publish">
+    <div class="form-row">
+        <label for="node-input-connection"><i class="fa fa-plug"></i> Connection</label>
+        <input type="text" id="node-input-connection">
+    </div>
+    <div class="form-row">
+        <label for="node-input-topic"><i class="fa fa-rss"></i> Topic</label>
+        <input type="text" id="node-input-topic" placeholder="/turtle1/cmd_vel (or msg.topic)" autocomplete="off">
+        <span id="ros2-publish-hint" class="ros2-hint"></span>
+    </div>
+    <div class="form-row">
+        <label for="node-input-rosType"><i class="fa fa-cube"></i> Type</label>
+        <input type="text" id="node-input-rosType" placeholder="auto-detect" style="width: 55%">
+        <button id="ros2-publish-template-btn" class="red-ui-button" title="show and copy an example message">
+            <i class="fa fa-file-code-o"></i> template
+        </button>
+        <pre id="ros2-publish-template" class="ros2-template"></pre>
+    </div>
+    <div class="form-row">
+        <label for="node-input-validation"><i class="fa fa-check-square-o"></i> Validate</label>
+        <select id="node-input-validation" style="width: 70%">
+            <option value="strict">strict — invalid messages are not sent (error for Catch)</option>
+            <option value="warn">warn — log problems, send anyway</option>
+            <option value="off">off — no checks</option>
+        </select>
+    </div>
+    <div class="form-row">
+        <input type="checkbox" id="node-input-latch" style="display: inline-block; width: auto; vertical-align: top; margin-left: 105px;">
+        <label for="node-input-latch" style="width: auto;">latched (late subscribers get the last message)</label>
+    </div>
+    <div class="form-row">
+        <input type="checkbox" id="node-input-allowOverride" style="display: inline-block; width: auto; vertical-align: top; margin-left: 105px;">
+        <label for="node-input-allowOverride" style="width: auto;">msg.topic overrides the configured topic</label>
+    </div>
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name">
+    </div>
+</script>
+
+<script type="text/html" data-help-name="ros2-publish">
+    <p>Publishes <code>msg.payload</code> to a ROS 2 topic through rosbridge.</p>
+    <h3>Inputs</h3>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">object | string | number | boolean</span></dt>
+        <dd>the ROS message as JSON, e.g. <code>{"linear": {"x": 1}, "angular": {"z": 0.5}}</code>
+            for <code>geometry_msgs/msg/Twist</code>. Missing fields are filled with defaults by rosbridge.
+            A plain value is wrapped as <code>{data: value}</code> for single-field types like
+            <code>std_msgs/msg/String</code>.</dd>
+        <dt class="optional">topic <span class="property-type">string</span></dt>
+        <dd>used when the node has no topic configured, or when "msg.topic overrides" is ticked.
+            Off by default so a <code>msg.topic</code> left over from an upstream subscribe node cannot
+            redirect the publisher.</dd>
+        <dt class="optional">rosType <span class="property-type">string</span></dt>
+        <dd>message type, overrides the configured type.</dd>
+    </dl>
+    <h3>Outputs</h3>
+    <dl class="message-properties">
+        <dt>ros <span class="property-type">object</span></dt>
+        <dd>the input message is passed on after publishing, with <code>msg.ros = {topic, type}</code>.</dd>
+    </dl>
+    <h3>Details</h3>
+    <p><b>Type</b>: empty means auto-detect from the topic list. When nothing advertises the topic yet,
+       set the type (e.g. <code>geometry_msgs/msg/Twist</code>) or pass <code>msg.rosType</code>.
+       The <i>template</i> button shows a complete example message and copies it to the clipboard.</p>
+    <p><b>Validation</b> checks the payload against the type definition from rosapi: field names,
+       JSON types, integer ranges and fixed array lengths (<code>uint8[]</code> may be a base64 string).
+       <code>strict</code> blocks invalid messages and reports them via <code>done(err)</code>, so a Catch
+       node sees them; <code>warn</code> logs and publishes; <code>off</code> skips all checks.</p>
+    <p>Errors (not connected, unknown type, invalid message) never pass silently: the status turns red
+       and the error goes to Catch nodes.</p>
+</script>
