@@ -6,13 +6,19 @@ const { sameType, similarNames } = require('../lib/type-registry');
 const DIAGNOSE_AFTER = 5000;
 const RETRY_TYPE_EVERY = 5000;
 
+// rosbridge (2.x) fixes the QoS when the first of its clients subscribes to a
+// topic: BEST_EFFORT + VOLATILE, or TRANSIENT_LOCAL + RELIABLE when every
+// publisher present at that moment is latched. Such a subscription never
+// receives VOLATILE or BEST_EFFORT publishers that join later.
 const QOS_EXPLANATION = (topic) =>
-    `no data on ${topic} for ${DIAGNOSE_AFTER / 1000} s although it is advertised. Either the publisher is idle, ` +
-    'or the QoS profiles do not match: a BEST_EFFORT publisher (typical for sensor data like /scan, ' +
-    'camera images, odometry) never delivers to a RELIABLE subscriber, and a TRANSIENT_LOCAL-only ' +
-    'publisher can refuse a VOLATILE one. Compare with `ros2 topic info -v ' + topic + '` and ' +
-    '`ros2 topic hz ' + topic + '` on the robot. If rosbridge subscribed before the publisher existed, ' +
-    'restarting this flow lets rosbridge pick a matching QoS.';
+    `no data on ${topic} for ${DIAGNOSE_AFTER / 1000} s although it is advertised. Likely causes: ` +
+    '(1) the publisher is idle — check `ros2 topic hz ' + topic + '`; ' +
+    '(2) QoS: rosbridge fixes its QoS when the topic is first subscribed through it (by any rosbridge client) — ' +
+    'TRANSIENT_LOCAL + RELIABLE if all publishers present then were latched, which never receives VOLATILE or ' +
+    'BEST_EFFORT publishers that joined later. Compare with `ros2 topic info -v ' + topic + '`; redeploying helps ' +
+    'only if no other rosbridge client keeps the topic subscribed; ' +
+    '(3) discovery works but data does not arrive: DDS shared-memory transport between containers without a ' +
+    'shared /dev/shm, firewalls, or large messages (images, point clouds) lost over Wi-Fi with BEST_EFFORT.';
 
 module.exports = function (RED) {
     function Ros2SubscribeNode(config) {
@@ -131,6 +137,10 @@ module.exports = function (RED) {
                     warnedQos = true;
                     node.warn(QOS_EXPLANATION(topic));
                 }
+            }
+            // keep the status current (e.g. a publisher appears later) until data arrives
+            if (!closed && unsubscribe && received === receivedAtArm && conn.client.connected) {
+                watchdog = setTimeout(diagnose, DIAGNOSE_AFTER);
             }
         }
 

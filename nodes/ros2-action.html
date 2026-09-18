@@ -9,6 +9,7 @@ RED.nodes.registerType('ros2-action', {
         rosType: { value: '' },
         timeout: { value: 0, validate: RED.validators.number(true) },
         concurrent: { value: false },
+        feedbackEvents: { value: 'none' },
         validation: { value: 'warn' },
         allowOverride: { value: false }
     },
@@ -62,6 +63,13 @@ RED.nodes.registerType('ros2-action', {
         <label for="node-input-concurrent" style="width: auto;">allow concurrent goals</label>
     </div>
     <div class="form-row">
+        <label for="node-input-feedbackEvents"><i class="fa fa-bolt"></i> Status out</label>
+        <select id="node-input-feedbackEvents" style="width: 70%">
+            <option value="none">lifecycle events only (sent, executing, result …)</option>
+            <option value="all">also one "feedback" event per feedback message</option>
+        </select>
+    </div>
+    <div class="form-row">
         <label for="node-input-validation"><i class="fa fa-check-square-o"></i> Validate</label>
         <select id="node-input-validation" style="width: 70%">
             <option value="strict">strict — invalid goals are not sent</option>
@@ -112,10 +120,11 @@ RED.nodes.registerType('ros2-action', {
             <dl class="message-properties">
                 <dt>payload <span class="property-type">object</span></dt>
                 <dd>always <code>{event, goalId, action, at, status?, error?}</code> with
-                    <code>event</code> one of <code>sent</code>, <code>feedback</code>, <code>succeeded</code>,
-                    <code>aborted</code>, <code>canceled</code>, <code>failed</code>,
+                    <code>event</code> one of <code>sent</code>, <code>executing</code>, <code>feedback</code>,
+                    <code>succeeded</code>, <code>aborted</code>, <code>canceled</code>, <code>failed</code>,
                     <code>cancel-requested</code>. Made for state machines: switch on
-                    <code>payload.event</code>.</dd>
+                    <code>payload.event</code>. <code>feedback</code> events are only emitted when
+                    <i>Status out</i> asks for them, so high-rate feedback does not flood a state machine.</dd>
             </dl>
         </li>
     </ol>
@@ -125,6 +134,6 @@ RED.nodes.registerType('ros2-action', {
        (send <code>msg.cancel</code> first). A timeout cancels the goal and emits <code>failed</code>.
        <code>failed</code> means the goal never produced a normal result: rejected, timed out, or the
        connection dropped. It is also reported via <code>done(err)</code> for Catch nodes.</p>
-    <p>rosbridge does not report goal acceptance separately, so there is no <code>accepted</code> event;
-       the first <code>feedback</code> confirms the goal is executing.</p>
+    <p>rosbridge does not report goal acceptance, so there is no <code>accepted</code> event. The first
+       feedback message emits <code>executing</code> once per goal; a rejected goal ends in <code>failed</code>.</p>
 </script>

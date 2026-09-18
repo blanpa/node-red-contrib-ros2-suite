@@ -80,6 +80,31 @@ describe('TypeRegistry', function () {
         }
     });
 
+    it('skips rosapi services and resolves parameter services without rosapi calls', async function () {
+        const reg = new TypeRegistry(client);
+        mock.clearReceived();
+        const services = await reg.listServices();
+        assert.ok(!services.some((s) => s.name.startsWith('/rosapi/')));
+        assert.deepStrictEqual(services.find((s) => s.name === '/turtlesim/get_parameters'), { name: '/turtlesim/get_parameters', type: 'rcl_interfaces/srv/GetParameters' });
+        const typeCalls = mock.received.filter((f) => f.service === '/rosapi/service_type').map((f) => f.args.service);
+        assert.ok(!typeCalls.includes('/turtlesim/get_parameters'));
+        assert.ok(typeCalls.includes('/turtle1/teleport_absolute'));
+    });
+
+    it('uses /rosapi/action_type only where it does not crash rosapi', async function () {
+        mock.clearReceived();
+        assert.deepStrictEqual(await new TypeRegistry(client).actionTypeInfo('/turtle1/rotate_absolute'),
+            { type: 'turtlesim/action/RotateAbsolute', guessed: true });
+        assert.ok(!mock.received.some((f) => f.service === '/rosapi/action_type'));
+        mock.distro = 'rolling';
+        try {
+            assert.deepStrictEqual(await new TypeRegistry(client).actionTypeInfo('/turtle1/rotate_absolute'),
+                { type: 'turtlesim/action/RotateAbsolute', guessed: false });
+        } finally {
+            mock.distro = 'jazzy';
+        }
+    });
+
     it('lists services, actions and nodes', async function () {
         const services = await registry.listServices();
         assert.ok(services.find((s) => s.name === '/turtle1/teleport_absolute' && s.type === 'turtlesim/srv/TeleportAbsolute'));

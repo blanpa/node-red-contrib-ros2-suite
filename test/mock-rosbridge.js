@@ -71,6 +71,7 @@ class MockRosbridge {
         this._pendingClientCalls = new Map();
         this._seq = 0;
         this.rosapiEnabled = true;
+        this.distro = opts.distro || 'jazzy';
 
         this.topics = [
             { name: '/turtle1/pose', type: 'turtlesim/msg/Pose' },
@@ -91,7 +92,8 @@ class MockRosbridge {
             ['/turtle1/teleport_absolute', { type: 'turtlesim/srv/TeleportAbsolute', handler: () => ({}) }],
             ['/reset', { type: 'std_srvs/srv/Empty', handler: () => ({}) }],
             ['/slow_service', { type: 'std_srvs/srv/Trigger', handler: () => MockRosbridge.NEVER }],
-            ['/failing_service', { type: 'std_srvs/srv/Trigger', handler: () => { throw new Error('boom'); } }]
+            ['/failing_service', { type: 'std_srvs/srv/Trigger', handler: () => { throw new Error('boom'); } }],
+            ['/turtlesim/get_parameters', { type: 'rcl_interfaces/srv/GetParameters', handler: () => ({ values: [] }) }]
         ]);
 
         // name -> {type, feedback: [..], intervalMs, status, result, reject}
@@ -252,7 +254,11 @@ class MockRosbridge {
                 break;
             case 'cancel_action_goal': {
                 const g = this._goals.get(m.id);
-                if (g) {
+                if (g && this.actions.get(g.action).ignoreCancel) {
+                    clearInterval(g.timer);
+                    this._goals.delete(m.id);
+                    this._send(ws, { op: 'action_result', id: m.id, action: g.action, values: { delta: 1 }, status: 4, result: true });
+                } else if (g) {
                     clearInterval(g.timer);
                     this._goals.delete(m.id);
                     this._send(ws, { op: 'action_result', id: m.id, action: g.action, values: { delta: 0 }, status: 5, result: true });
@@ -332,6 +338,16 @@ class MockRosbridge {
                 return { nodes: this.nodes };
             case 'interfaces':
                 return { interfaces: this.interfaces };
+            case 'get_ros_version':
+                return { version: 2, distro: this.distro };
+            case 'action_type': {
+                if (['humble', 'jazzy', 'kilted'].includes(this.distro)) {
+                    this.rosapiEnabled = false; // like the real rosapi: it dies
+                    throw new Error('rosapi crashed');
+                }
+                const a = this.actions.get(args.action);
+                return { type: a ? a.type : '' };
+            }
             case 'action_servers':
                 return { action_servers: [...this.actions.keys()] };
             case 'message_details':

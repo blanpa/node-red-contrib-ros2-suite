@@ -119,7 +119,9 @@ RED.nodes.registerType('ros2-service', {
         <dd><code>{service, type, durationMs}</code></dd>
     </dl>
     <p>Failures (service missing, timeout, rosbridge error) go to Catch nodes via <code>done(err)</code>.
-       For a missing service the error lists similar service names.</p>
+       For a missing service the error lists similar service names. The timeout is also sent to rosbridge,
+       so calls longer than rosbridge's own 5 s default work. <code>/rosapi/action_type</code> is refused
+       because it crashes rosapi on ROS 2 Humble, Jazzy and Kilted.</p>
 
     <h3>Server mode</h3>
     <p>The node advertises the service on the ROS side. Each incoming request is emitted as a

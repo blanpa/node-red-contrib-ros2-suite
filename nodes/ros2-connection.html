@@ -16,22 +16,49 @@
     var TTL = 5000;
     var cache = {};
 
-    function endpoint(connId, path, params) {
+    function request(method, url, data) {
         return new Promise(function (resolve, reject) {
             $.ajax({
-                url: 'ros2-suite/' + encodeURIComponent(connId) + '/' + path,
-                data: params || {},
+                url: url,
+                method: method,
+                data: method === 'POST' ? JSON.stringify(data) : data,
+                contentType: method === 'POST' ? 'application/json' : undefined,
                 dataType: 'json',
                 timeout: 15000
             }).done(resolve).fail(function (xhr) {
-                var msg = (xhr.responseJSON && xhr.responseJSON.error) || xhr.statusText || 'request failed';
-                reject(new Error(msg));
+                var body = xhr.responseJSON || {};
+                var err = new Error(body.error || xhr.statusText || 'request failed');
+                err.notDeployed = !!body.notDeployed;
+                reject(err);
             });
         });
     }
 
+    // Settings of a connection as currently edited (possibly not deployed yet).
+    function probeParams(cfg) {
+        var p = {
+            id: cfg.id, host: cfg.host, port: cfg.port, tls: cfg.tls, path: cfg.path,
+            url: cfg.url, verifyTls: cfg.verifyTls !== false
+        };
+        if (cfg.credentials && typeof cfg.credentials.token === 'string' && cfg.credentials.token) p.token = cfg.credentials.token;
+        return p;
+    }
+
+    /** Query the deployed connection, or probe with the editor's settings if it is new or changed. */
+    function endpoint(connId, path, params) {
+        var cfg = RED.nodes.node(connId);
+        var probe = function () {
+            if (!cfg) return Promise.reject(new Error('unknown connection'));
+            return request('POST', 'ros2-suite/probe/' + path, $.extend(probeParams(cfg), params || {}));
+        };
+        if (cfg && cfg.changed) return probe();
+        return request('GET', 'ros2-suite/' + encodeURIComponent(connId) + '/' + path, params || {})
+            .catch(function (err) { if (err.notDeployed) return probe(); throw err; });
+    }
+
     function list(connId, kind) {
-        var key = connId + ':' + kind;
+        var cfg = RED.nodes.node(connId);
+        var key = connId + ':' + kind + ':' + (cfg && cfg.changed ? JSON.stringify(probeParams(cfg)) : 'deployed');
         var hit = cache[key];
         if (hit && Date.now() - hit.at < TTL) return hit.promise;
         var promise = endpoint(connId, kind);
@@ -82,7 +109,7 @@
             source: function (req, respond) {
                 var id = getConnId();
                 if (!usable(id)) {
-                    showType($hint, 'pick or deploy a connection to browse ' + kind, 'info');
+                    showType($hint, 'pick a connection to browse ' + kind, 'info');
                     respond([]);
                     return;
                 }
@@ -143,7 +170,7 @@
             e.preventDefault();
             var id = getConnId();
             var type = getType();
-            if (!usable(id)) { $out.text('Pick and deploy a connection first.').show(); return; }
+            if (!usable(id)) { $out.text('Pick a connection first.').show(); return; }
             if (!type) { $out.text('No type yet — pick a name above or set the type.').show(); return; }
             $out.text('loading ' + type + ' …').show();
             endpoint(id, 'template', { type: type, kind: kind }).then(function (r) {
@@ -179,6 +206,7 @@ RED.nodes.registerType('ros2-connection', {
         host: { value: 'localhost' },
         port: { value: 9090, validate: RED.validators.number(true) },
         tls: { value: false },
+        verifyTls: { value: true },
         path: { value: '' },
         url: {
             value: '',
@@ -229,6 +257,10 @@ RED.nodes.registerType('ros2-connection', {
         <label for="node-config-input-tls" style="width: auto;">TLS (wss://)</label>
     </div>
     <div class="form-row">
+        <input type="checkbox" id="node-config-input-verifyTls" style="display: inline-block; width: auto; vertical-align: top; margin-left: 105px;">
+        <label for="node-config-input-verifyTls" style="width: auto;">verify the server certificate (untick for self-signed)</label>
+    </div>
+    <div class="form-row">
         <label for="node-config-input-url"><i class="fa fa-link"></i> URL</label>
         <input type="text" id="node-config-input-url" placeholder="optional, overrides host/port — e.g. wss://robot.example/rosbridge">
     </div>
@@ -259,7 +291,8 @@ RED.nodes.registerType('ros2-connection', {
         <dt>Host / Port <span class="property-type">string / number</span></dt>
         <dd>where <code>rosbridge_websocket</code> listens, default <code>localhost:9090</code>.</dd>
         <dt>Path, TLS</dt>
-        <dd>for rosbridge behind a reverse proxy: URL path and <code>wss://</code>.</dd>
+        <dd>for rosbridge behind a reverse proxy, or rosbridge's own TLS (<code>ssl:=true</code>): URL path and
+            <code>wss://</code>. Untick <i>verify the server certificate</i> for self-signed certificates.</dd>
         <dt>URL <span class="property-type">string</span></dt>
         <dd>full WebSocket URL; overrides host, port, path and TLS when set.</dd>
         <dt>Token <span class="property-type">credential</span></dt>
@@ -277,6 +310,7 @@ RED.nodes.registerType('ros2-connection', {
     <pre>sudo apt install ros-$ROS_DISTRO-rosbridge-suite
 ros2 launch rosbridge_server rosbridge_websocket_launch.xml</pre>
     <p>rosapi powers type auto-detection, autocomplete, templates and validation.
-       The connection opens when the first node using it starts. Autocomplete in the other
-       nodes needs the connection to be deployed once.</p>
+       The connection opens when the first node using it starts. Autocomplete also works for a
+       connection that is not deployed yet: the editor then asks the Node-RED server to connect with
+       the settings from this dialog (needs write permission).</p>
 </script>

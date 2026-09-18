@@ -14,6 +14,7 @@ module.exports = function (RED) {
         const validation = ['strict', 'warn', 'off'].includes(config.validation) ? config.validation : 'warn';
         const allowOverride = !!config.allowOverride;
         const concurrent = !!config.concurrent;
+        const feedbackEvents = config.feedbackEvents === 'all';
         const timeoutSec = Number(config.timeout);
         const timeout = Number.isFinite(timeoutSec) && timeoutSec > 0 ? timeoutSec * 1000 : 0;
 
@@ -23,8 +24,9 @@ module.exports = function (RED) {
             return;
         }
 
-        const goals = new Map(); // goalId -> {action, handle}
+        const goals = new Map(); // goalId -> {action, handle, cancelRequested}
         const warnedGuess = new Set();
+        let warnedCancel = false;
         let lastOutcome = null;
 
         function statusEvent(event, goalId, action, extra) {
@@ -89,6 +91,7 @@ module.exports = function (RED) {
                 return;
             }
             for (const id of targets) {
+                goals.get(id).cancelRequested = true;
                 goals.get(id).handle.cancel();
                 const status = RED.util.cloneMessage(msg);
                 delete status.cancel;
@@ -123,6 +126,7 @@ module.exports = function (RED) {
 
                 const base = RED.util.cloneMessage(msg);
                 let goalId = null;
+                let executing = false;
                 const out = (index, payload, ros) => {
                     const m = RED.util.cloneMessage(base);
                     m.payload = payload;
@@ -140,9 +144,23 @@ module.exports = function (RED) {
                     timeout,
                     onFeedback: (values) => {
                         out(0, values, { event: 'feedback' });
-                        out(2, statusEvent('feedback', goalId, action), { event: 'feedback' });
+                        // rosbridge reports no acceptance, so the first feedback is the
+                        // earliest sign that the server took the goal
+                        if (!executing) {
+                            executing = true;
+                            out(2, statusEvent('executing', goalId, action), { event: 'executing' });
+                        }
+                        if (feedbackEvents) out(2, statusEvent('feedback', goalId, action), { event: 'feedback' });
                     },
                     onResult: ({ status, statusCode, values }) => {
+                        const entry = goals.get(goalId);
+                        if (entry && entry.cancelRequested && status !== 'canceled' && !warnedCancel) {
+                            warnedCancel = true;
+                            node.warn(`${action}: cancel was requested but the goal ended "${status}". Either the action ` +
+                                'server does not support canceling, or rosbridge handled the goal in its main thread ' +
+                                '(ROS 2 Humble default) and saw the cancel only afterwards — start rosbridge with ' +
+                                'send_action_goals_in_new_thread:=true call_services_in_new_thread:=true');
+                        }
                         lastOutcome = status;
                         finish();
                         out(1, values, { status, statusCode });

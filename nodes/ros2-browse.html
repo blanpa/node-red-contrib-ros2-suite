@@ -89,5 +89,6 @@ RED.nodes.registerType('ros2-browse', {
     </dl>
     <h3>Details</h3>
     <p>Everything comes from rosapi, which the standard rosbridge launch file starts. Lists are cached
-       for 5 s. Action types are derived from each action's feedback topic.</p>
+       for 5 s. rosapi's own services are left out. Action types that could only be matched by name
+       carry <code>guessed: true</code>.</p>
 </script>

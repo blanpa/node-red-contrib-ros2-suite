@@ -1,7 +1,7 @@
 'use strict';
 
 const { statusSetter, shortType, pick, useConnection } = require('../lib/node-common');
-const { fullType, similarNames } = require('../lib/type-registry');
+const { fullType, similarNames, unsafeService } = require('../lib/type-registry');
 
 module.exports = function (RED) {
     function Ros2ServiceNode(config) {
@@ -75,6 +75,7 @@ module.exports = function (RED) {
                 const started = Date.now();
                 try {
                     if (!service) throw new Error('no service — set it on the node or pass msg.service');
+                    if (unsafeService(service)) throw new Error(unsafeService(service));
                     if (!conn.client.connected) throw new Error(`not connected to rosbridge at ${conn.url} — call to ${service} not sent`);
                     let type = (typeof msg.rosType === 'string' && msg.rosType.trim()) || configType || null;
                     if (!type) type = await conn.registry.serviceType(service).catch(() => null);

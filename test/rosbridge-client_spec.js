@@ -133,6 +133,7 @@ describe('RosbridgeClient', function () {
         assert.deepStrictEqual(ok, {});
         const frame = await mock.waitFor((f) => f.op === 'call_service' && f.service === '/turtle1/teleport_absolute');
         assert.strictEqual(frame.type, 'turtlesim/srv/TeleportAbsolute');
+        assert.strictEqual(frame.timeout, 0.5); // client default serviceTimeout in this spec
     });
 
     it('rejects failed service calls with the rosbridge message', async function () {
@@ -233,6 +234,17 @@ describe('RosbridgeClient', function () {
         assert.ok(client._adverts.has('/out'));
         b.unadvertise();
         await mock.waitFor((f) => f.op === 'unadvertise' && f.topic === '/out');
+    });
+
+    it('explains refused handshakes', async function () {
+        const http = require('http');
+        const server = http.createServer((req, res) => { res.writeHead(401); res.end(); });
+        await new Promise((r) => server.listen(0, '127.0.0.1', r));
+        const c = new RosbridgeClient({ url: `ws://127.0.0.1:${server.address().port}`, reconnectMin: 10000 });
+        const [, err] = await (async () => { const p = once(c, 'state', (s) => s === 'disconnected'); c.connect(); return p; })();
+        assert.match(err.message, /refused with HTTP 401 — check the token/);
+        await c.close();
+        server.close();
     });
 
     it('maps goal status codes', function () {

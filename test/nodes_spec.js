@@ -110,6 +110,27 @@ describe('nodes', function () {
             const state = await helper.request().get('/ros2-suite/c1/state').expect(200);
             assert.strictEqual(state.body.state, 'connected');
             await helper.request().get('/ros2-suite/nope/topics').expect(404);
+            assert.strictEqual(require('../nodes/ros2-connection.js').buildUrl({ host: 'r', port: 1, tls: 'true', path: 'rb' }), 'wss://r:1/rb');
+        });
+    });
+
+    describe('ros2-connection probe (undeployed connections)', function () {
+        it('lists topics with settings posted by the editor', async function () {
+            await helper.load(ALL, []);
+            const res = await helper.request().post('/ros2-suite/probe/topics')
+                .send({ host: '127.0.0.1', port: mock.port, tls: false }).expect(200);
+            assert.ok(res.body.some((t) => t.name === '/turtle1/pose'));
+            const tpl = await helper.request().post('/ros2-suite/probe/template')
+                .send({ url: mock.url, type: 'std_msgs/msg/String' }).expect(200);
+            assert.deepStrictEqual(tpl.body.template, { data: '' });
+        });
+
+        it('falls back from the id route with a notDeployed marker and rejects bad URLs', async function () {
+            await helper.load(ALL, []);
+            const miss = await helper.request().get('/ros2-suite/abc123/topics').expect(404);
+            assert.strictEqual(miss.body.notDeployed, true);
+            const bad = await helper.request().post('/ros2-suite/probe/topics').send({ url: 'http://x' }).expect(503);
+            assert.match(bad.body.error, /not a WebSocket URL/);
         });
     });
 
@@ -165,8 +186,25 @@ describe('nodes', function () {
             const sub = helper.getNode('sub');
             const warns = calls(sub, 'warn');
             await until(() => warns.length > 0, 7000, 'QoS warning');
-            assert.match(warns[0], /BEST_EFFORT publisher .* RELIABLE subscriber/);
+            assert.match(warns[0], /never receives VOLATILE or BEST_EFFORT publishers that joined later/);
             assert.ok(sub.status.calledWithMatch({ text: 'no data — check QoS / publisher' }));
+        });
+
+        it('keeps diagnosing until a late publisher shows up', async function () {
+            this.timeout(22000);
+            await helper.load(ALL, [
+                conn(),
+                { id: 'sub', type: 'ros2-subscribe', connection: 'c1', topic: '/late', rosType: 'std_msgs/msg/String', wires: [[]] }
+            ]);
+            const sub = helper.getNode('sub');
+            await until(() => sub.status.calledWithMatch({ text: sinonMatch(/^topic not advertised/) }), 7000, 'missing status');
+            mock.topics.push({ name: '/late', type: 'std_msgs/msg/String' });
+            try {
+                // next check within 5 s, topic list cached up to 5 s
+                await until(() => sub.status.calledWithMatch({ text: 'no data — check QoS / publisher' }), 12000, 'QoS status');
+            } finally {
+                mock.topics.pop();
+            }
         });
 
         it('shows the message rate', async function () {
@@ -287,6 +325,19 @@ describe('nodes', function () {
             assert.match(String(errors[0]), /not offered by any ROS node — did you mean \/turtle1\/teleport_absolute/);
         });
 
+        it('refuses services that crash rosapi', async function () {
+            await load([
+                conn(),
+                { id: 'svc', type: 'ros2-service', connection: 'c1', service: '/rosapi/action_type', wires: [[]] }
+            ]);
+            const svc = helper.getNode('svc');
+            const errors = calls(svc, 'error');
+            svc.receive({ payload: { action: '/x' } });
+            await until(() => errors.length > 0, 2000, 'error');
+            assert.match(String(errors[0]), /crashes the rosapi node/);
+            assert.ok(!mock.received.some((f) => f.service === '/rosapi/action_type'));
+        });
+
         it('times out', async function () {
             await load([
                 conn(),
@@ -370,15 +421,26 @@ describe('nodes', function () {
             assert.deepStrictEqual(feedback.map((m) => m.payload.remaining), [1.0, 0.5, 0.1]);
             await until(() => status.some((m) => m.payload.event === 'succeeded'), 1000, 'succeeded event');
             const events = status.map((m) => m.payload.event);
-            assert.deepStrictEqual(events, ['sent', 'feedback', 'feedback', 'feedback', 'succeeded']);
+            assert.deepStrictEqual(events, ['sent', 'executing', 'succeeded']);
             for (const { payload } of status) {
                 assert.strictEqual(payload.action, '/turtle1/rotate_absolute');
                 assert.strictEqual(payload.goalId, res.ros.goalId);
                 assert.ok(!Number.isNaN(Date.parse(payload.at)));
             }
-            assert.strictEqual(status[4].payload.status, 'succeeded');
+            assert.strictEqual(status[2].payload.status, 'succeeded');
             const frame = await mock.waitFor((f) => f.op === 'send_action_goal');
             assert.strictEqual(frame.action_type, 'turtlesim/action/RotateAbsolute');
+        });
+
+        it('emits one feedback status event per feedback when asked to', async function () {
+            await load(actionFlow({ feedbackEvents: 'all' }));
+            const status = collect(helper.getNode('st'));
+            const result = nextInput(helper.getNode('res'));
+            helper.getNode('act').receive({ payload: { theta: 1 } });
+            await result;
+            await until(() => status.some((m) => m.payload.event === 'succeeded'), 1000, 'succeeded event');
+            assert.deepStrictEqual(status.map((m) => m.payload.event),
+                ['sent', 'executing', 'feedback', 'feedback', 'feedback', 'succeeded']);
         });
 
         it('cancels on msg.cancel', async function () {
@@ -397,6 +459,26 @@ describe('nodes', function () {
                 assert.ok(status.some((m) => m.payload.event === 'cancel-requested'));
             } finally {
                 mock.actions.get('/turtle1/rotate_absolute').hang = false;
+            }
+        });
+
+        it('explains a cancel that the server did not honour', async function () {
+            const a = mock.actions.get('/turtle1/rotate_absolute');
+            a.hang = true;
+            a.ignoreCancel = true;
+            try {
+                await load(actionFlow());
+                const act = helper.getNode('act');
+                const warns = calls(act, 'warn');
+                const status = collect(helper.getNode('st'));
+                act.receive({ payload: { theta: 3 } });
+                await until(() => status.length > 0, 1000, 'sent');
+                act.receive({ cancel: true });
+                await until(() => warns.some((w) => /cancel was requested but the goal ended "succeeded"/.test(w)), 2000, 'cancel warning');
+                assert.ok(warns.some((w) => /send_action_goals_in_new_thread:=true/.test(w)));
+            } finally {
+                a.hang = false;
+                a.ignoreCancel = false;
             }
         });
 
