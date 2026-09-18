@@ -6,7 +6,7 @@
     .ros2-hint-ok { color: var(--red-ui-text-color-success, #3a7d3a); }
     .ros2-hint-warn { color: var(--red-ui-text-color-warning, #b8860b); }
     .ros2-hint-error { color: var(--red-ui-text-color-error, #c00); }
-    .ros2-template { margin: 6px 0 0 0; max-height: 220px; overflow: auto; font-size: 12px; display: none; }
+    .ros2-template { margin: 6px 0 0 0; max-height: 220px; overflow: auto; font-size: 12px; }
     .ros2-state { padding: 6px 8px; border-radius: 3px; background: var(--red-ui-secondary-background, #f3f3f3); font-size: 12px; }
 </style>
 
@@ -72,9 +72,12 @@
         detect();
 
         if (!$.fn.autocomplete) return;
+        var $tray = $input.closest('.red-ui-tray');
         $input.autocomplete({
             minLength: 0,
             delay: 100,
+            // inside the tray the menu stacks with the dialog, not with editor overlays
+            appendTo: $tray.length ? $tray : null,
             classes: { 'ui-autocomplete': 'ros2-suite-ac' },
             source: function (req, respond) {
                 var id = getConnId();
@@ -109,8 +112,9 @@
             if (item.entry && item.entry.type) $('<span class="ros2-ac-type">').text(item.entry.type).appendTo($div);
             return $li.appendTo(ul);
         };
+        // on focus list everything: replacing the current name is the common case
         $input.on('focus', function () {
-            if (!$input.autocomplete('widget').is(':visible')) $input.autocomplete('search', $input.val());
+            if (!$input.autocomplete('widget').is(':visible')) $input.autocomplete('search', '');
         });
     }
 
