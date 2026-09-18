@@ -1,0 +1,55 @@
+{
+  "name": "node-red-contrib-ros2-suite",
+  "version": "0.1.0",
+  "description": "Node-RED nodes for ROS 2 over rosbridge — subscribe, publish, services (client and server), actions and discovery. No local ROS install, no rclnodejs.",
+  "keywords": [
+    "node-red",
+    "ros",
+    "ros2",
+    "rosbridge",
+    "robotics",
+    "robot"
+  ],
+  "license": "Apache-2.0",
+  "author": "blanpa",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/blanpa/node-red-contrib-ros2-suite.git"
+  },
+  "homepage": "https://github.com/blanpa/node-red-contrib-ros2-suite#readme",
+  "bugs": {
+    "url": "https://github.com/blanpa/node-red-contrib-ros2-suite/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "lib/",
+    "nodes/",
+    "examples/",
+    "LICENSE",
+    "README.md"
+  ],
+  "node-red": {
+    "version": ">=3.0.0",
+    "nodes": {
+      "ros2-connection": "nodes/ros2-connection.js",
+      "ros2-subscribe": "nodes/ros2-subscribe.js",
+      "ros2-publish": "nodes/ros2-publish.js",
+      "ros2-service": "nodes/ros2-service.js",
+      "ros2-action": "nodes/ros2-action.js",
+      "ros2-browse": "nodes/ros2-browse.js"
+    }
+  },
+  "scripts": {
+    "test": "mocha \"test/**/*_spec.js\" --exit"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "mocha": "^11.0.0",
+    "node-red": "^4.0.0",
+    "node-red-node-test-helper": "^0.3.4"
+  }
+}
