@@ -1,0 +1,10 @@
+FROM nodered/node-red:4.1
+
+# The package is mounted as a volume (see docker-compose.yml), so edits on the
+# host only need a container restart. On first start the entrypoint seeds the
+# package's example flow. The stock image already ships a placeholder
+# flows.json, hence the separate flow file name.
+ENV FLOWS=ros2-suite-flows.json
+COPY --chmod=755 nodered-entrypoint.sh /usr/src/node-red/seed-entrypoint.sh
+
+ENTRYPOINT ["/usr/src/node-red/seed-entrypoint.sh"]

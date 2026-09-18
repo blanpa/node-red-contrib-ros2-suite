@@ -1,0 +1,13 @@
+FROM ros:jazzy
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ros-jazzy-rosbridge-suite \
+        ros-jazzy-turtlesim \
+    && rm -rf /var/lib/apt/lists/*
+
+# turtlesim is a Qt app; render offscreen so it runs without a display
+ENV QT_QPA_PLATFORM=offscreen
+
+EXPOSE 9090
+CMD ["bash", "-c", "source /opt/ros/jazzy/setup.bash && ros2 run turtlesim turtlesim_node & source /opt/ros/jazzy/setup.bash && exec ros2 launch rosbridge_server rosbridge_websocket_launch.xml"]

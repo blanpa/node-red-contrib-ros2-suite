@@ -1,0 +1,595 @@
+[
+    {
+        "id": "tab_ros2_demo",
+        "type": "tab",
+        "label": "ROS 2 turtlesim",
+        "disabled": false,
+        "info": "Demo for node-red-contrib-ros2-suite against turtlesim.\n\nStart the stack with `cd docker && docker compose up --build`, or run rosbridge + turtlesim on your own ROS 2 machine and change the connection host."
+    },
+    {
+        "id": "conn_turtlesim",
+        "type": "ros2-connection",
+        "name": "turtlesim",
+        "host": "localhost",
+        "port": 9090,
+        "tls": false,
+        "path": "",
+        "url": "",
+        "reconnectMin": 1,
+        "reconnectMax": 30,
+        "serviceTimeout": 10
+    },
+    {
+        "id": "c_sub",
+        "type": "comment",
+        "z": "tab_ros2_demo",
+        "name": "Subscribe: pose (status shows Hz)",
+        "info": "The debug node is off by default — pose arrives at ~60 Hz. Enable it to see messages.",
+        "x": 170,
+        "y": 60,
+        "wires": []
+    },
+    {
+        "id": "sub_pose",
+        "type": "ros2-subscribe",
+        "z": "tab_ros2_demo",
+        "name": "",
+        "connection": "conn_turtlesim",
+        "topic": "/turtle1/pose",
+        "rosType": "",
+        "throttle": 0,
+        "queue": 1,
+        "x": 170,
+        "y": 100,
+        "wires": [
+            [
+                "dbg_pose"
+            ]
+        ]
+    },
+    {
+        "id": "dbg_pose",
+        "type": "debug",
+        "z": "tab_ros2_demo",
+        "name": "pose",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 430,
+        "y": 100,
+        "wires": []
+    },
+    {
+        "id": "c_pub",
+        "type": "comment",
+        "z": "tab_ros2_demo",
+        "name": "Publish: drive the turtle (geometry_msgs/Twist)",
+        "info": "",
+        "x": 230,
+        "y": 160,
+        "wires": []
+    },
+    {
+        "id": "inj_fwd",
+        "type": "inject",
+        "z": "tab_ros2_demo",
+        "name": "forward",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"linear\":{\"x\":2.0},\"angular\":{\"z\":0.0}}",
+        "payloadType": "json",
+        "x": 130,
+        "y": 200,
+        "wires": [
+            [
+                "pub_cmd"
+            ]
+        ]
+    },
+    {
+        "id": "inj_turn",
+        "type": "inject",
+        "z": "tab_ros2_demo",
+        "name": "curve left",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"linear\":{\"x\":2.0},\"angular\":{\"z\":1.8}}",
+        "payloadType": "json",
+        "x": 140,
+        "y": 240,
+        "wires": [
+            [
+                "pub_cmd"
+            ]
+        ]
+    },
+    {
+        "id": "inj_bad",
+        "type": "inject",
+        "z": "tab_ros2_demo",
+        "name": "invalid (strict blocks it)",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"linear\":{\"x\":\"fast\"}}",
+        "payloadType": "json",
+        "x": 170,
+        "y": 280,
+        "wires": [
+            [
+                "pub_cmd"
+            ]
+        ]
+    },
+    {
+        "id": "pub_cmd",
+        "type": "ros2-publish",
+        "z": "tab_ros2_demo",
+        "name": "",
+        "connection": "conn_turtlesim",
+        "topic": "/turtle1/cmd_vel",
+        "rosType": "geometry_msgs/msg/Twist",
+        "validation": "strict",
+        "latch": false,
+        "allowOverride": false,
+        "x": 450,
+        "y": 240,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "catch_pub",
+        "type": "catch",
+        "z": "tab_ros2_demo",
+        "name": "validation errors",
+        "scope": [
+            "pub_cmd"
+        ],
+        "uncaught": false,
+        "x": 440,
+        "y": 300,
+        "wires": [
+            [
+                "dbg_catch"
+            ]
+        ]
+    },
+    {
+        "id": "dbg_catch",
+        "type": "debug",
+        "z": "tab_ros2_demo",
+        "name": "publish error",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "error.message",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 660,
+        "y": 300,
+        "wires": []
+    },
+    {
+        "id": "c_svc",
+        "type": "comment",
+        "z": "tab_ros2_demo",
+        "name": "Service client: teleport back to the centre",
+        "info": "",
+        "x": 210,
+        "y": 360,
+        "wires": []
+    },
+    {
+        "id": "inj_tp",
+        "type": "inject",
+        "z": "tab_ros2_demo",
+        "name": "teleport to centre",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"x\":5.5,\"y\":5.5,\"theta\":0}",
+        "payloadType": "json",
+        "x": 150,
+        "y": 400,
+        "wires": [
+            [
+                "svc_tp"
+            ]
+        ]
+    },
+    {
+        "id": "svc_tp",
+        "type": "ros2-service",
+        "z": "tab_ros2_demo",
+        "name": "",
+        "connection": "conn_turtlesim",
+        "mode": "client",
+        "service": "/turtle1/teleport_absolute",
+        "rosType": "",
+        "timeout": "",
+        "validation": "warn",
+        "allowOverride": false,
+        "x": 440,
+        "y": 400,
+        "wires": [
+            [
+                "dbg_tp"
+            ]
+        ]
+    },
+    {
+        "id": "dbg_tp",
+        "type": "debug",
+        "z": "tab_ros2_demo",
+        "name": "teleport response",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 690,
+        "y": 400,
+        "wires": []
+    },
+    {
+        "id": "c_act",
+        "type": "comment",
+        "z": "tab_ros2_demo",
+        "name": "Action: rotate_absolute → feedback / result / status events",
+        "info": "",
+        "x": 250,
+        "y": 460,
+        "wires": []
+    },
+    {
+        "id": "inj_rot",
+        "type": "inject",
+        "z": "tab_ros2_demo",
+        "name": "rotate to 90°",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"theta\":1.5708}",
+        "payloadType": "json",
+        "x": 140,
+        "y": 500,
+        "wires": [
+            [
+                "act_rot"
+            ]
+        ]
+    },
+    {
+        "id": "inj_rot2",
+        "type": "inject",
+        "z": "tab_ros2_demo",
+        "name": "rotate to 270°",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"theta\":-1.5708}",
+        "payloadType": "json",
+        "x": 140,
+        "y": 540,
+        "wires": [
+            [
+                "act_rot"
+            ]
+        ]
+    },
+    {
+        "id": "inj_cancel",
+        "type": "inject",
+        "z": "tab_ros2_demo",
+        "name": "cancel",
+        "props": [
+            {
+                "p": "cancel",
+                "v": "true",
+                "vt": "bool"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "true",
+        "payloadType": "bool",
+        "x": 130,
+        "y": 580,
+        "wires": [
+            [
+                "act_rot"
+            ]
+        ]
+    },
+    {
+        "id": "act_rot",
+        "type": "ros2-action",
+        "z": "tab_ros2_demo",
+        "name": "",
+        "connection": "conn_turtlesim",
+        "action": "/turtle1/rotate_absolute",
+        "rosType": "turtlesim/action/RotateAbsolute",
+        "timeout": "30",
+        "concurrent": false,
+        "validation": "warn",
+        "allowOverride": false,
+        "x": 440,
+        "y": 540,
+        "wires": [
+            [
+                "dbg_fb"
+            ],
+            [
+                "dbg_res"
+            ],
+            [
+                "dbg_st"
+            ]
+        ]
+    },
+    {
+        "id": "dbg_fb",
+        "type": "debug",
+        "z": "tab_ros2_demo",
+        "name": "feedback",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 680,
+        "y": 500,
+        "wires": []
+    },
+    {
+        "id": "dbg_res",
+        "type": "debug",
+        "z": "tab_ros2_demo",
+        "name": "result",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 680,
+        "y": 540,
+        "wires": []
+    },
+    {
+        "id": "dbg_st",
+        "type": "debug",
+        "z": "tab_ros2_demo",
+        "name": "status events",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 690,
+        "y": 580,
+        "wires": []
+    },
+    {
+        "id": "c_srv",
+        "type": "comment",
+        "z": "tab_ros2_demo",
+        "name": "Service server: Node-RED provides /nodered/greet (std_srvs/Trigger)",
+        "info": "Try on the robot: ros2 service call /nodered/greet std_srvs/srv/Trigger",
+        "x": 270,
+        "y": 640,
+        "wires": []
+    },
+    {
+        "id": "srv_greet",
+        "type": "ros2-service",
+        "z": "tab_ros2_demo",
+        "name": "",
+        "connection": "conn_turtlesim",
+        "mode": "server",
+        "service": "/nodered/greet",
+        "rosType": "std_srvs/srv/Trigger",
+        "timeout": "5",
+        "validation": "warn",
+        "allowOverride": false,
+        "x": 170,
+        "y": 680,
+        "wires": [
+            [
+                "chg_greet"
+            ]
+        ]
+    },
+    {
+        "id": "chg_greet",
+        "type": "change",
+        "z": "tab_ros2_demo",
+        "name": "build response",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"success\":true,\"message\":\"hello from Node-RED\"}",
+                "tot": "json"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 420,
+        "y": 680,
+        "wires": [
+            [
+                "srv_greet"
+            ]
+        ]
+    },
+    {
+        "id": "c_brw",
+        "type": "comment",
+        "z": "tab_ros2_demo",
+        "name": "Browse the ROS graph",
+        "info": "",
+        "x": 150,
+        "y": 740,
+        "wires": []
+    },
+    {
+        "id": "inj_all",
+        "type": "inject",
+        "z": "tab_ros2_demo",
+        "name": "everything",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "all",
+        "payloadType": "str",
+        "x": 130,
+        "y": 780,
+        "wires": [
+            [
+                "brw_all"
+            ]
+        ]
+    },
+    {
+        "id": "inj_tpl",
+        "type": "inject",
+        "z": "tab_ros2_demo",
+        "name": "Twist template",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "rosType",
+                "v": "geometry_msgs/msg/Twist",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "template",
+        "payloadType": "str",
+        "x": 140,
+        "y": 820,
+        "wires": [
+            [
+                "brw_all"
+            ]
+        ]
+    },
+    {
+        "id": "brw_all",
+        "type": "ros2-browse",
+        "z": "tab_ros2_demo",
+        "name": "",
+        "connection": "conn_turtlesim",
+        "what": "all",
+        "rosType": "",
+        "kind": "msg",
+        "x": 380,
+        "y": 800,
+        "wires": [
+            [
+                "dbg_brw"
+            ]
+        ]
+    },
+    {
+        "id": "dbg_brw",
+        "type": "debug",
+        "z": "tab_ros2_demo",
+        "name": "graph",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 590,
+        "y": 800,
+        "wires": []
+    }
+]

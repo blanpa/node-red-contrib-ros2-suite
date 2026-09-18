@@ -1,0 +1,31 @@
+# ROS 2 Jazzy with turtlesim + rosbridge, and Node-RED with this package.
+#   cd docker && docker compose up --build
+#   Node-RED: http://localhost:1880   rosbridge: ws://localhost:9090
+name: ros2-suite
+
+services:
+  ros2:
+    build:
+      context: .
+      dockerfile: Dockerfile.ros2
+    ports:
+      - "9090:9090"   # rosbridge
+      - "1880:1880"   # Node-RED (shares this network namespace)
+    restart: unless-stopped
+
+  nodered:
+    build:
+      context: .
+      dockerfile: Dockerfile.nodered
+    # Share the ROS container's network so the example flow's ws://localhost:9090
+    # works unchanged here and on a laptop with a local rosbridge.
+    network_mode: "service:ros2"
+    depends_on:
+      - ros2
+    volumes:
+      - ..:/usr/src/node-red/node_modules/node-red-contrib-ros2-suite:ro
+      - nodered-data:/data
+    restart: unless-stopped
+
+volumes:
+  nodered-data:
