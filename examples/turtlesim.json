@@ -366,7 +366,7 @@
         "name": "",
         "connection": "conn_turtlesim",
         "action": "/turtle1/rotate_absolute",
-        "rosType": "turtlesim/action/RotateAbsolute",
+        "rosType": "",
         "timeout": "30",
         "concurrent": false,
         "validation": "warn",
@@ -383,7 +383,8 @@
             [
                 "dbg_st"
             ]
-        ]
+        ],
+        "feedbackEvents": "none"
     },
     {
         "id": "dbg_fb",

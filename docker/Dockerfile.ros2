@@ -1,13 +1,19 @@
-FROM ros:jazzy
+ARG ROS_DISTRO=jazzy
+FROM ros:${ROS_DISTRO}
+ARG ROS_DISTRO
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ros-jazzy-rosbridge-suite \
-        ros-jazzy-turtlesim \
+        ros-${ROS_DISTRO}-rosbridge-suite \
+        ros-${ROS_DISTRO}-turtlesim \
     && rm -rf /var/lib/apt/lists/*
 
 # turtlesim is a Qt app; render offscreen so it runs without a display
 ENV QT_QPA_PLATFORM=offscreen
 
+# The thread options are Humble's missing defaults (Jazzy+ already uses them):
+# without them a running action goal blocks rosbridge, including cancel requests.
+ENV ROSBRIDGE_ARGS="call_services_in_new_thread:=true send_action_goals_in_new_thread:=true"
+
 EXPOSE 9090
-CMD ["bash", "-c", "source /opt/ros/jazzy/setup.bash && ros2 run turtlesim turtlesim_node & source /opt/ros/jazzy/setup.bash && exec ros2 launch rosbridge_server rosbridge_websocket_launch.xml"]
+CMD ["bash", "-c", "source /opt/ros/$ROS_DISTRO/setup.bash && ros2 run turtlesim turtlesim_node & source /opt/ros/$ROS_DISTRO/setup.bash && exec ros2 launch rosbridge_server rosbridge_websocket_launch.xml $ROSBRIDGE_ARGS"]

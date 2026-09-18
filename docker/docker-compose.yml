@@ -1,5 +1,6 @@
-# ROS 2 Jazzy with turtlesim + rosbridge, and Node-RED with this package.
+# ROS 2 with turtlesim + rosbridge, and Node-RED with this package.
 #   cd docker && docker compose up --build
+#   other distro: ROS_DISTRO=humble docker compose up --build
 #   Node-RED: http://localhost:1880   rosbridge: ws://localhost:9090
 name: ros2-suite
 
@@ -8,6 +9,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.ros2
+      args:
+        ROS_DISTRO: ${ROS_DISTRO:-jazzy}
+    image: ros2-suite-ros2:${ROS_DISTRO:-jazzy}
     ports:
       - "9090:9090"   # rosbridge
       - "1880:1880"   # Node-RED (shares this network namespace)
