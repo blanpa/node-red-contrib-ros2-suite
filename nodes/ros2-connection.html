@@ -1,0 +1,267 @@
+<style>
+    .ros2-suite-ac.ui-autocomplete { z-index: 1000 !important; max-height: 320px; overflow-y: auto; overflow-x: hidden; font-size: 13px; }
+    .ros2-suite-ac .ros2-ac-type { opacity: 0.6; margin-left: 6px; font-size: 12px; }
+    .ros2-hint { display: block; margin: 2px 0 0 105px; font-size: 12px; min-height: 16px; }
+    .ros2-hint-info { color: var(--red-ui-secondary-text-color, #777); }
+    .ros2-hint-ok { color: var(--red-ui-text-color-success, #3a7d3a); }
+    .ros2-hint-warn { color: var(--red-ui-text-color-warning, #b8860b); }
+    .ros2-hint-error { color: var(--red-ui-text-color-error, #c00); }
+    .ros2-template { margin: 6px 0 0 0; max-height: 220px; overflow: auto; font-size: 12px; display: none; }
+    .ros2-state { padding: 6px 8px; border-radius: 3px; background: var(--red-ui-secondary-background, #f3f3f3); font-size: 12px; }
+</style>
+
+<script type="text/javascript">
+(function () {
+    'use strict';
+    var TTL = 5000;
+    var cache = {};
+
+    function endpoint(connId, path, params) {
+        return new Promise(function (resolve, reject) {
+            $.ajax({
+                url: 'ros2-suite/' + encodeURIComponent(connId) + '/' + path,
+                data: params || {},
+                dataType: 'json',
+                timeout: 15000
+            }).done(resolve).fail(function (xhr) {
+                var msg = (xhr.responseJSON && xhr.responseJSON.error) || xhr.statusText || 'request failed';
+                reject(new Error(msg));
+            });
+        });
+    }
+
+    function list(connId, kind) {
+        var key = connId + ':' + kind;
+        var hit = cache[key];
+        if (hit && Date.now() - hit.at < TTL) return hit.promise;
+        var promise = endpoint(connId, kind);
+        cache[key] = { at: Date.now(), promise: promise };
+        promise.catch(function () { delete cache[key]; });
+        return promise;
+    }
+
+    function usable(connId) {
+        return connId && connId !== '_ADD_';
+    }
+
+    function showType($hint, text, level) {
+        if (!$hint || !$hint.length) return;
+        $hint.text(text || '')
+            .removeClass('ros2-hint-info ros2-hint-ok ros2-hint-warn ros2-hint-error')
+            .addClass('ros2-hint ros2-hint-' + (level || 'info'));
+    }
+
+    /**
+     * Autocomplete for topics | services | actions. onPick(entry|null) fires on
+     * selection and when a typed name matches (or no longer matches) an entry.
+     */
+    function attachAutocomplete($input, kind, getConnId, onPick, $hint) {
+        function detect() {
+            var name = ($input.val() || '').trim();
+            var id = getConnId();
+            if (!name || !usable(id)) { if (onPick) onPick(null, name); return; }
+            list(id, kind).then(function (entries) {
+                var entry = entries.filter(function (e) { return e.name === name; })[0] || null;
+                if (onPick) onPick(entry, name);
+            }).catch(function (err) {
+                showType($hint, err.message, 'warn');
+            });
+        }
+
+        $input.on('change', detect);
+        detect();
+
+        if (!$.fn.autocomplete) return;
+        $input.autocomplete({
+            minLength: 0,
+            delay: 100,
+            classes: { 'ui-autocomplete': 'ros2-suite-ac' },
+            source: function (req, respond) {
+                var id = getConnId();
+                if (!usable(id)) {
+                    showType($hint, 'pick or deploy a connection to browse ' + kind, 'info');
+                    respond([]);
+                    return;
+                }
+                list(id, kind).then(function (entries) {
+                    var term = (req.term || '').toLowerCase();
+                    var hits = entries.filter(function (e) {
+                        return !term || e.name.toLowerCase().indexOf(term) !== -1 ||
+                            (e.type || '').toLowerCase().indexOf(term) !== -1;
+                    }).slice(0, 200);
+                    if (!hits.length) showType($hint, 'no ' + kind + ' match "' + req.term + '"', 'info');
+                    respond(hits.map(function (e) { return { label: e.name, value: e.name, entry: e }; }));
+                }).catch(function (err) {
+                    showType($hint, err.message, 'error');
+                    respond([]);
+                });
+            },
+            select: function (event, ui) {
+                $input.val(ui.item.value);
+                if (onPick) onPick(ui.item.entry, ui.item.value);
+                return false;
+            }
+        });
+        var ac = $input.autocomplete('instance');
+        ac._renderItem = function (ul, item) {
+            var $li = $('<li>');
+            var $div = $('<div>').text(item.label).appendTo($li);
+            if (item.entry && item.entry.type) $('<span class="ros2-ac-type">').text(item.entry.type).appendTo($div);
+            return $li.appendTo(ul);
+        };
+        $input.on('focus', function () {
+            if (!$input.autocomplete('widget').is(':visible')) $input.autocomplete('search', $input.val());
+        });
+    }
+
+    /** Standard reaction to a pick: show the detected type as placeholder and hint. */
+    function typeDetector($type, $hint, noun) {
+        return function (entry, name) {
+            if (entry && entry.type) {
+                $type.attr('placeholder', entry.type);
+                showType($hint, 'detected: ' + entry.type, 'ok');
+            } else {
+                $type.attr('placeholder', 'auto-detect');
+                if (name) showType($hint, noun + ' ' + name + ' is not available right now — set the type if you know it', 'warn');
+                else showType($hint, '', 'info');
+            }
+        };
+    }
+
+    function attachTemplateButton($button, $out, getConnId, getType, kind) {
+        $button.on('click', function (e) {
+            e.preventDefault();
+            var id = getConnId();
+            var type = getType();
+            if (!usable(id)) { $out.text('Pick and deploy a connection first.').show(); return; }
+            if (!type) { $out.text('No type yet — pick a name above or set the type.').show(); return; }
+            $out.text('loading ' + type + ' …').show();
+            endpoint(id, 'template', { type: type, kind: kind }).then(function (r) {
+                var text = JSON.stringify(r.template, null, 2);
+                $out.text(text).show();
+                if (RED.clipboard && RED.clipboard.copyText) RED.clipboard.copyText(text, $button, 'template copied');
+            }).catch(function (err) {
+                $out.text(err.message).show();
+            });
+        });
+    }
+
+    window.ROS2Suite = {
+        endpoint: endpoint,
+        list: list,
+        showType: showType,
+        attachAutocomplete: attachAutocomplete,
+        attachTemplateButton: attachTemplateButton,
+        typeDetector: typeDetector,
+        connId: function () { return $('#node-input-connection').val(); }
+    };
+})();
+
+RED.nodes.registerType('ros2-connection', {
+    category: 'config',
+    defaults: {
+        name: { value: '' },
+        host: { value: 'localhost' },
+        port: { value: 9090, validate: RED.validators.number(true) },
+        tls: { value: false },
+        path: { value: '' },
+        url: {
+            value: '',
+            validate: function (v) { return !v || /^wss?:\/\/.+/i.test(v); }
+        },
+        reconnectMin: { value: 1, validate: RED.validators.number(true) },
+        reconnectMax: { value: 30, validate: RED.validators.number(true) },
+        serviceTimeout: { value: 10, validate: RED.validators.number(true) }
+    },
+    credentials: {
+        token: { type: 'password' }
+    },
+    label: function () {
+        if (this.name) return this.name;
+        if (this.url) return this.url;
+        return (this.tls ? 'wss' : 'ws') + '://' + (this.host || 'localhost') + ':' + (this.port || 9090) + (this.path || '');
+    },
+    oneditprepare: function () {
+        var node = this;
+        var $state = $('#ros2-connection-state');
+        $.getJSON('ros2-suite/' + encodeURIComponent(node.id) + '/state').done(function (s) {
+            var text = s.state + ' — ' + s.url;
+            if (s.lastError && s.state !== 'connected') text += ' — ' + s.lastError;
+            if (s.users) text += ' — used by ' + s.users + ' node(s)';
+            $state.text(text);
+        }).fail(function (xhr) {
+            $state.text((xhr.responseJSON && xhr.responseJSON.error) || 'not deployed');
+        });
+    }
+});
+</script>
+
+<script type="text/html" data-template-name="ros2-connection">
+    <div class="form-row">
+        <label for="node-config-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-config-input-name" placeholder="robot">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-host"><i class="fa fa-server"></i> Host</label>
+        <input type="text" id="node-config-input-host" placeholder="localhost" style="width: 45%">
+        <label for="node-config-input-port" style="margin-left: 10px; width: 40px;">Port</label>
+        <input type="text" id="node-config-input-port" placeholder="9090" style="width: 70px">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-path"><i class="fa fa-road"></i> Path</label>
+        <input type="text" id="node-config-input-path" placeholder="(none)" style="width: 45%">
+        <input type="checkbox" id="node-config-input-tls" style="display: inline-block; width: auto; vertical-align: top; margin-left: 10px;">
+        <label for="node-config-input-tls" style="width: auto;">TLS (wss://)</label>
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-url"><i class="fa fa-link"></i> URL</label>
+        <input type="text" id="node-config-input-url" placeholder="optional, overrides host/port — e.g. wss://robot.example/rosbridge">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-token"><i class="fa fa-key"></i> Token</label>
+        <input type="password" id="node-config-input-token" placeholder="optional, sent as Authorization: Bearer">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-reconnectMin"><i class="fa fa-refresh"></i> Reconnect</label>
+        <input type="text" id="node-config-input-reconnectMin" style="width: 50px"> s …
+        <input type="text" id="node-config-input-reconnectMax" style="width: 50px"> s (backoff)
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-serviceTimeout"><i class="fa fa-clock-o"></i> Svc timeout</label>
+        <input type="text" id="node-config-input-serviceTimeout" style="width: 50px"> s (default for service nodes)
+    </div>
+    <div class="form-row">
+        <label><i class="fa fa-plug"></i> State</label>
+        <span id="ros2-connection-state" class="ros2-state">…</span>
+    </div>
+</script>
+
+<script type="text/html" data-help-name="ros2-connection">
+    <p>Connection to a <b>rosbridge</b> server (rosbridge v2 protocol, JSON over WebSocket).
+       All ROS 2 nodes that use the same connection share one WebSocket.</p>
+    <h3>Properties</h3>
+    <dl class="message-properties">
+        <dt>Host / Port <span class="property-type">string / number</span></dt>
+        <dd>where <code>rosbridge_websocket</code> listens, default <code>localhost:9090</code>.</dd>
+        <dt>Path, TLS</dt>
+        <dd>for rosbridge behind a reverse proxy: URL path and <code>wss://</code>.</dd>
+        <dt>URL <span class="property-type">string</span></dt>
+        <dd>full WebSocket URL; overrides host, port, path and TLS when set.</dd>
+        <dt>Token <span class="property-type">credential</span></dt>
+        <dd>sent as <code>Authorization: Bearer &lt;token&gt;</code> in the WebSocket handshake
+            (for authenticating reverse proxies).</dd>
+        <dt>Reconnect <span class="property-type">seconds</span></dt>
+        <dd>exponential backoff between the two limits. After reconnecting, all subscriptions,
+            advertised topics and provided services are restored automatically; service calls and
+            action goals that were running are failed, not left hanging.</dd>
+        <dt>Svc timeout <span class="property-type">seconds</span></dt>
+        <dd>default timeout for service calls (service nodes can override it).</dd>
+    </dl>
+    <h3>Details</h3>
+    <p>On the robot, run rosbridge together with rosapi (the launch file starts both):</p>
+    <pre>sudo apt install ros-$ROS_DISTRO-rosbridge-suite
+ros2 launch rosbridge_server rosbridge_websocket_launch.xml</pre>
+    <p>rosapi powers type auto-detection, autocomplete, templates and validation.
+       The connection opens when the first node using it starts. Autocomplete in the other
+       nodes needs the connection to be deployed once.</p>
+</script>
