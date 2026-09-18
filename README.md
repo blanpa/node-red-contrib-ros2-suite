@@ -9,8 +9,8 @@ from the palette and point the nodes at your robot.
 - **Autocomplete** for topics, services and actions in the editor, with each type shown next to the name.
 - **Message templates** for any type, one click in the editor or via the browse node.
 - **Validation** of outgoing messages against the type definition (`strict` / `warn` / `off`).
-- **QoS diagnosis.** A silent subscription tells you whether the topic is missing (with
-  "did you mean …") or whether it looks like a QoS mismatch.
+- **Silent-topic diagnosis.** A subscription that gets nothing tells you whether the topic
+  is missing (with "did you mean …") or advertised but silent (QoS, idle publisher, transport).
 - **Actions** with three outputs (feedback, result, status events), ready for state machines.
 - **Service server mode.** A flow can provide a ROS service.
 - **Reconnect** with backoff. Subscriptions, advertisements and services are restored,
@@ -36,20 +36,45 @@ sudo apt install ros-$ROS_DISTRO-rosbridge-suite
 ros2 launch rosbridge_server rosbridge_websocket_launch.xml   # ws://<robot>:9090
 ```
 
+On **Humble**, add the thread options that later distros use by default:
+
+```sh
+ros2 launch rosbridge_server rosbridge_websocket_launch.xml \
+    call_services_in_new_thread:=true send_action_goals_in_new_thread:=true
+```
+
+Without them, rosbridge handles a running action goal in its main thread. Everything the
+clients send then waits until the goal ends, including cancel requests, publishes and service
+calls. The action node warns when a cancel was ignored this way.
+
 The launch file also starts **rosapi**, which powers type detection, autocomplete, templates
 and validation. Without rosapi the nodes still work if you set every type yourself.
+
+### Tested with
+
+Each distro ran 22 end-to-end checks against turtlesim through Node-RED: every node, cancel,
+the service server called from `ros2 service call`, the QoS diagnosis, the xstate example below,
+and a reconnect after restarting ROS.
+
+| ROS 2 | rosbridge | Result | Action types |
+|---|---|---|---|
+| Humble | 2.0.8 | 22/22 (with the thread options above) | matched by name |
+| Jazzy | 2.7.1 | 22/22 | matched by name |
+| Kilted | 3.3.1 | 22/22 | matched by name |
+| Rolling | 4.2.1 | 22/22 | read exactly via rosapi |
 
 rosbridge has no authentication of its own. Keep port 9090 on a trusted network, or put it
 behind a reverse proxy (TLS and a token are supported by the connection node).
 
 ## Quick start with Docker
 
-`docker/` contains ROS 2 Jazzy with turtlesim and rosbridge, plus Node-RED with this package
-mounted from the working copy:
+`docker/` contains ROS 2 (Jazzy by default) with turtlesim and rosbridge, plus Node-RED with
+this package mounted from the working copy:
 
 ```sh
 cd docker
 docker compose up --build
+ROS_DISTRO=humble docker compose up --build    # or kilted, rolling
 ```
 
 Open <http://localhost:1880>. The example flow (`examples/turtlesim.json`) is preloaded:
@@ -86,8 +111,14 @@ All nodes follow the same conventions:
 ### ros2-connection (config)
 
 Host, port, path and TLS, or a full URL. The optional token is sent as `Authorization: Bearer …`.
-Also sets the reconnect backoff limits and the default service timeout. The socket opens when
-the first node using the connection starts. The config dialog shows the live connection state.
+Untick *verify the server certificate* for rosbridge's own TLS with a self-signed certificate
+(`ssl:=true certfile:=… keyfile:=…`). Also sets the reconnect backoff limits and the default
+service timeout. The socket opens when the first node using the connection starts. The config
+dialog shows the live connection state.
+
+Autocomplete also works for a connection that is new or edited but not deployed. In that case
+the editor asks the Node-RED server to connect with the settings from the dialog, which needs
+write permission (`flows.write`).
 
 ### ros2-subscribe
 
@@ -120,7 +151,9 @@ the type: *"no message type for /x — nothing advertises it yet, so set the typ
 
 **Client mode:** `payload` is the request. The output `payload` is the response and
 `msg.ros = {service, type, durationMs}`. A missing service fails with similar names as
-suggestions; a timeout fails with a hint to check `ros2 service list`.
+suggestions; a timeout fails with a hint to check `ros2 service list`. The node's timeout is
+passed to rosbridge, so calls longer than rosbridge's own 5 s default work. The node refuses
+to call `/rosapi/action_type`, which crashes rosapi on Humble, Jazzy and Kilted.
 
 **Server mode:** the node advertises the service. Each request leaves the output with
 `payload` (the request) and `msg._ros2 = {replyTo, requestId}`. Wire the end of your flow
@@ -138,10 +171,17 @@ Three outputs:
 2. **result**: `payload` = result message, `msg.ros.status` = `succeeded` | `aborted` | `canceled`
 3. **status**: `payload` is always `{event, goalId, action, at, status?, error?}`
 
-`event` is one of `sent`, `feedback`, `succeeded`, `aborted`, `canceled`, `failed`,
-`cancel-requested`. `failed` means there was no normal result: the goal was rejected, timed
-out (it is then cancelled), or the connection dropped. All outputs keep the properties of the
-input message, so correlation fields survive.
+`event` is one of `sent`, `executing`, `feedback`, `succeeded`, `aborted`, `canceled`,
+`failed`, `cancel-requested`:
+
+- `executing` is emitted once, with the first feedback message. rosbridge reports no separate
+  acceptance step.
+- `feedback` events are off by default so high-rate feedback does not flood a state machine.
+  Turn them on with *Status out*.
+- `failed` means there was no normal result: the goal was rejected, timed out (it is then
+  cancelled), or the connection dropped.
+
+All outputs keep the properties of the input message, so correlation fields survive.
 
 `msg.cancel = true` cancels `msg.goalId`, or all running goals of the node. Without
 *concurrent goals*, a second goal while one is running is refused. The status dot shows
@@ -150,25 +190,35 @@ input message, so correlation fields survive.
 ### ros2-browse
 
 `what` = `topics` | `services` | `actions` | `nodes` | `all` | `template`. It can also be
-passed as `msg.payload`. Lists come back as `[{name, type}]`. `template` returns a complete
+passed as `msg.payload`. Lists come back as `[{name, type}]`. Actions whose type was matched
+by name carry `guessed: true`. rosapi's own services are left out of the service list. `template` returns a complete
 default message for `msg.rosType`; `msg.kind` selects `msg`, `request`, `response`, `goal`,
 `result` or `feedback`.
 
-## QoS diagnosis
+## Silent-topic diagnosis (QoS)
 
-A subscription that receives nothing for 5 s checks the topic list and tells two cases apart:
+A subscription that receives nothing for 5 s checks the topic list and keeps checking until
+data arrives. It tells two cases apart:
 
 - **`topic not advertised (did you mean /turtle1/pose?)`**: nothing publishes this name.
   Without a configured type, the node keeps waiting and subscribes as soon as the topic appears.
-- **`no data — check QoS / publisher`**: the topic exists but nothing arrives. The most common
-  cause is a QoS mismatch. Sensor publishers (`/scan`, cameras, odometry) often use
-  `BEST_EFFORT`, which never delivers to a `RELIABLE` subscriber. A `TRANSIENT_LOCAL`
-  publisher can also refuse a `VOLATILE` subscriber. Compare with `ros2 topic info -v /x`
-  and `ros2 topic hz /x` on the robot. rosbridge chooses its subscriber QoS when it
-  subscribes, so if the publisher started later, redeploying the flow lets it pick a matching
-  profile.
+- **`no data — check QoS / publisher`**: the topic exists but nothing arrives. The debug
+  sidebar gets the likely causes once:
+  1. **The publisher is idle.** Check `ros2 topic hz /x`.
+  2. **QoS.** rosbridge fixes the QoS of its subscription when the topic is first subscribed
+     through it, by any rosbridge client. It uses `BEST_EFFORT` + `VOLATILE`, which matches
+     every publisher. The exception: if *all* publishers present at that moment are latched
+     (`TRANSIENT_LOCAL`), rosbridge uses `TRANSIENT_LOCAL` + `RELIABLE`. That subscription
+     never receives `VOLATILE` or `BEST_EFFORT` publishers that join later. A typical case is
+     `/map` from a map server, with a SLAM node publishing later. Compare with
+     `ros2 topic info -v /x`. Redeploying helps only if no other rosbridge client keeps the
+     topic subscribed.
+  3. **Discovery works but data does not arrive.** Typical causes are DDS shared-memory
+     transport between containers without a shared `/dev/shm`, firewalls, or large messages
+     (images, point clouds) lost over Wi-Fi with `BEST_EFFORT`.
 
-The node explains this once in the debug sidebar and keeps the short form in its status.
+The QoS case (2) is part of the end-to-end tests: a latched publisher first, a
+`BEST_EFFORT`/`VOLATILE` publisher later.
 
 ## State machine with ros2-action
 
@@ -221,21 +271,21 @@ return {
 };
 ```
 
-Events the machine does not handle (`sent`, `feedback`, `cancel-requested`) are ignored. To
-abort from the machine, send `{cancel: true}` to the action node.
+Events the machine does not handle (`sent`, `executing`, `cancel-requested`) are ignored. To
+abort from the machine, send `{cancel: true}` to the action node. This example runs as part of
+the end-to-end tests on all four distros.
 
 ## Notes and limits
 
-- **Action types on Jazzy:** rosapi hides the `_action/*` topics, and `/rosapi/action_type`
-  crashes the rosapi node on Jazzy (rosbridge 2.7), so this package never calls it. When the
-  type cannot be read from the graph, it is matched by name against the installed action
-  interfaces (`rotate_absolute` → `turtlesim/action/RotateAbsolute`). The editor marks such
-  types as *guessed*, and the node warns once. Set the type on the node to be sure.
-- rosbridge reports no separate "goal accepted" step, so there is no `accepted` event. The
-  first `feedback` confirms execution.
+- **Action types:** rosapi hides the `_action/*` topics. `/rosapi/action_type` crashes the
+  rosapi node on Humble, Jazzy and Kilted, so this package calls it only on other distros
+  (it works on Rolling). Elsewhere the type is matched by name against the installed action
+  interfaces (`rotate_absolute` → `turtlesim/action/RotateAbsolute`, or
+  `turtlesim_msgs/action/RotateAbsolute` on Kilted and newer). The editor marks such types as
+  *guessed*, and the node warns once. Set the type on the node to be sure. Keep in mind that
+  interface packages move between distros, as turtlesim's did.
 - The first message after a fresh advertisement is delayed by 250 ms so that DDS subscribers
   can match. Otherwise ROS silently drops it.
-- Autocomplete needs the connection to be deployed once.
 
 ## Roadmap
 
@@ -252,8 +302,9 @@ npm install
 npm test            # mocha: client, registry and all nodes against a mock rosbridge
 ```
 
-`test/mock-rosbridge.js` imitates rosbridge and rosapi, including the typedef spellings Jazzy
-reports. `docker/` is the integration setup against real turtlesim. See
+`test/mock-rosbridge.js` imitates rosbridge and rosapi, including the typedef spellings, the
+hidden action topics and the `action_type` crash of real rosapi. `docker/` is the integration
+setup against real turtlesim (`ROS_DISTRO=…` selects the distro). See
 [ARCHITECTURE.md](ARCHITECTURE.md) for the layering.
 
 ## License
