@@ -30,7 +30,7 @@ RED.nodes.registerType('ros2-publish', {
         ROS2Suite.attachAutocomplete($('#node-input-topic'), 'topics', ROS2Suite.connId,
             ROS2Suite.typeDetector($type, $hint, 'topic'), $hint);
         ROS2Suite.attachTemplateButton($('#ros2-publish-template-btn'), $('#ros2-publish-template'),
-            ROS2Suite.connId, function () { return $type.val() || ($type.attr('placeholder') !== 'auto-detect' && $type.attr('placeholder')); }, 'msg');
+            ROS2Suite.connId, function () { return ROS2Suite.typeOf($type); }, 'msg');
     }
 });
 </script>

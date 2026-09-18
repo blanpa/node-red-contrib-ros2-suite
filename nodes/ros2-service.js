@@ -128,13 +128,24 @@ module.exports = function (RED) {
                 return;
             }
 
+            // rosbridge ignores the failure flag of a service_response, so the ROS
+            // caller only ever sees a response. Carry the error in the common
+            // success/message fields (std_srvs/Trigger, SetBool, …) when they exist.
+            async function errorResponse(text) {
+                const fields = await conn.registry.fieldNames(configType, 'response').catch(() => []);
+                const values = {};
+                if (fields.includes('success')) values.success = false;
+                if (fields.includes('message')) values.message = text;
+                return values;
+            }
+
             function onRequest(args, respond) {
                 const requestId = `${node.id}:${++seq}`;
                 const entry = { respond, timer: null };
                 if (timeout > 0) {
                     entry.timer = setTimeout(() => {
                         open.delete(requestId);
-                        respond({}, false);
+                        errorResponse(`no answer from the Node-RED flow within ${timeout / 1000} s`).then((v) => respond(v, false));
                         setStatus('warn', `request not answered within ${timeout / 1000} s`);
                         node.warn(`${configService}: the flow did not answer within ${timeout / 1000} s — wire the response back into this node and keep msg._ros2`);
                     }, timeout);
@@ -171,14 +182,13 @@ module.exports = function (RED) {
                 clearTimeout(entry.timer);
                 try {
                     if (msg.error) {
-                        // rosbridge has no error channel for provided services: the caller gets a failure/default response
-                        entry.respond({}, false);
                         const text = typeof msg.error === 'string' ? msg.error : (msg.error.message || JSON.stringify(msg.error));
+                        entry.respond(await errorResponse(text), false);
                         node.warn(`${configService}: answered request with an error: ${text}`);
                     } else {
                         const response = msg.payload === undefined || msg.payload === null ? {} : msg.payload;
-                        await check(configType, response, 'response').catch((err) => {
-                            entry.respond({}, false);
+                        await check(configType, response, 'response').catch(async (err) => {
+                            entry.respond(await errorResponse(err.message), false);
                             throw err;
                         });
                         entry.respond(response, true);

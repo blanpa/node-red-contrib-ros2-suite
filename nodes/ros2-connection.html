@@ -117,9 +117,15 @@
     /** Standard reaction to a pick: show the detected type as placeholder and hint. */
     function typeDetector($type, $hint, noun) {
         return function (entry, name) {
-            if (entry && entry.type) {
+            if (entry && entry.type && entry.guessed) {
+                $type.attr('placeholder', entry.type);
+                showType($hint, 'guessed from the name: ' + entry.type + ' — set the type to be sure', 'warn');
+            } else if (entry && entry.type) {
                 $type.attr('placeholder', entry.type);
                 showType($hint, 'detected: ' + entry.type, 'ok');
+            } else if (entry) {
+                $type.attr('placeholder', 'set the type');
+                showType($hint, name + ' exists, but its type cannot be detected — set it', 'warn');
             } else {
                 $type.attr('placeholder', 'auto-detect');
                 if (name) showType($hint, noun + ' ' + name + ' is not available right now — set the type if you know it', 'warn');
@@ -153,6 +159,11 @@
         attachAutocomplete: attachAutocomplete,
         attachTemplateButton: attachTemplateButton,
         typeDetector: typeDetector,
+        /** configured type, else the detected one shown as placeholder */
+        typeOf: function ($type) {
+            var ph = $type.attr('placeholder') || '';
+            return ($type.val() || '').trim() || (ph.indexOf('/') !== -1 ? ph : '');
+        },
         connId: function () { return $('#node-input-connection').val(); }
     };
 })();

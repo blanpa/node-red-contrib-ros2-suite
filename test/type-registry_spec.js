@@ -66,13 +66,24 @@ describe('TypeRegistry', function () {
         assert.strictEqual(await registry.topicType('/turtle1/cmd_vel'), 'geometry_msgs/msg/Twist');
         assert.strictEqual(await registry.topicType('/nope'), null);
         assert.strictEqual(await registry.serviceType('/turtle1/teleport_absolute'), 'turtlesim/srv/TeleportAbsolute');
-        assert.strictEqual(await registry.actionType('/turtle1/rotate_absolute'), 'turtlesim/action/RotateAbsolute');
+        assert.deepStrictEqual(await registry.actionTypeInfo('/turtle1/rotate_absolute'), { type: 'turtlesim/action/RotateAbsolute', guessed: true });
+        assert.strictEqual(await registry.actionType('/robot/navigate_to_pose'), null);
+    });
+
+    it('reads the action type from the feedback topic when rosapi lists hidden topics', async function () {
+        const reg = new TypeRegistry(client);
+        mock.topics.push({ name: '/turtle1/rotate_absolute/_action/feedback', type: 'turtlesim/action/RotateAbsolute_FeedbackMessage' });
+        try {
+            assert.deepStrictEqual(await reg.actionTypeInfo('/turtle1/rotate_absolute'), { type: 'turtlesim/action/RotateAbsolute', guessed: false });
+        } finally {
+            mock.topics.pop();
+        }
     });
 
     it('lists services, actions and nodes', async function () {
         const services = await registry.listServices();
         assert.ok(services.find((s) => s.name === '/turtle1/teleport_absolute' && s.type === 'turtlesim/srv/TeleportAbsolute'));
-        assert.deepStrictEqual(await registry.listActions(), [{ name: '/turtle1/rotate_absolute', type: 'turtlesim/action/RotateAbsolute' }]);
+        assert.deepStrictEqual(await registry.listActions(), [{ name: '/turtle1/rotate_absolute', type: 'turtlesim/action/RotateAbsolute', guessed: true }]);
         assert.ok((await registry.listNodes()).includes('/turtlesim'));
     });
 

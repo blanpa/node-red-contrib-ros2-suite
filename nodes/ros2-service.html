@@ -35,7 +35,7 @@ RED.nodes.registerType('ros2-service', {
         var $mode = $('#node-input-mode');
         ROS2Suite.attachAutocomplete($('#node-input-service'), 'services', ROS2Suite.connId,
             ROS2Suite.typeDetector($type, $hint, 'service'), $hint);
-        var detected = function () { return $type.val() || ($type.attr('placeholder') !== 'auto-detect' && $type.attr('placeholder')); };
+        var detected = function () { return ROS2Suite.typeOf($type); };
         ROS2Suite.attachTemplateButton($('#ros2-service-template-btn'), $('#ros2-service-template'), ROS2Suite.connId,
             detected, $mode.val() === 'server' ? 'response' : 'request');
         $mode.on('change', function () {
@@ -139,10 +139,11 @@ RED.nodes.registerType('ros2-service', {
         <dd>the response, e.g. <code>{"success": true, "message": "done"}</code> for
             <code>std_srvs/srv/Trigger</code>.</dd>
         <dt class="optional">error <span class="property-type">string</span></dt>
-        <dd>answer with a failure instead. rosbridge has no error text for provided services, so the ROS
-            caller sees a failed call (or a default response, depending on the rosbridge version); the
-            error is logged here.</dd>
+        <dd>answer with an error instead. rosbridge cannot signal a failed call to the ROS caller, so the
+            caller receives a response: <code>success: false</code> and <code>message: &lt;error&gt;</code>
+            when the response type has those fields (e.g. <code>std_srvs/srv/Trigger</code>), otherwise the
+            default response. The error is also logged here.</dd>
     </dl>
     <p>The type is required in server mode. Requests the flow does not answer within the timeout
-       are answered with a failure. The service is re-advertised automatically after a reconnect.</p>
+       get the same error response. The service is re-advertised automatically after a reconnect.</p>
 </script>

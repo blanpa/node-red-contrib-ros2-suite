@@ -330,6 +330,7 @@ describe('nodes', function () {
             });
             const res = await mock.callClientService('/nr/fail', {});
             assert.strictEqual(res.result, false);
+            assert.deepStrictEqual(res.values, { success: false, message: 'not today' });
         });
 
         it('rejects input without a request reference in server mode', async function () {
@@ -447,7 +448,7 @@ describe('nodes', function () {
             const { payload } = await out;
             assert.ok(payload.topics.some((t) => t.name === '/turtle1/pose'));
             assert.ok(payload.services.some((s) => s.name === '/turtle1/teleport_absolute'));
-            assert.deepStrictEqual(payload.actions, [{ name: '/turtle1/rotate_absolute', type: 'turtlesim/action/RotateAbsolute' }]);
+            assert.deepStrictEqual(payload.actions, [{ name: '/turtle1/rotate_absolute', type: 'turtlesim/action/RotateAbsolute', guessed: true }]);
             assert.ok(payload.nodes.includes('/turtlesim'));
         });
 

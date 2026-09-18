@@ -24,6 +24,7 @@ module.exports = function (RED) {
         }
 
         const goals = new Map(); // goalId -> {action, handle}
+        const warnedGuess = new Set();
         let lastOutcome = null;
 
         function statusEvent(event, goalId, action, extra) {
@@ -43,7 +44,12 @@ module.exports = function (RED) {
             let type = null;
             let names = [];
             try {
-                type = await conn.registry.actionType(action);
+                const info = await conn.registry.actionTypeInfo(action);
+                type = info && info.type;
+                if (info && info.guessed && !warnedGuess.has(action)) {
+                    warnedGuess.add(action);
+                    node.warn(`${action}: rosapi cannot report action types on this ROS distro, so ${type} was picked by name — set the type on the node to be sure`);
+                }
                 if (!type) names = (await conn.registry.listActions()).map((a) => a.name);
             } catch (err) {
                 throw new Error(`no action type for ${action} and rosapi could not tell (${err.message}) — set the type on the node or pass msg.rosType`);
@@ -51,7 +57,10 @@ module.exports = function (RED) {
             if (!type) {
                 const similar = similarNames(action, names);
                 const hint = similar.length ? ` — did you mean ${similar.join(', ')}?` : '';
-                throw new Error(`no action server for ${action}${hint} — start it, or set the type on the node to send anyway`);
+                const known = names.includes(action);
+                throw new Error(known
+                    ? `cannot detect the type of ${action} — set it on the node (e.g. nav2_msgs/action/NavigateToPose) or pass msg.rosType`
+                    : `no action server for ${action}${hint} — start it, or set the type on the node to send anyway`);
             }
             return type;
         }

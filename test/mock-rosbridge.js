@@ -1,7 +1,8 @@
 'use strict';
 
 // A small rosbridge v2 stand-in: enough protocol and rosapi to exercise the
-// client, the registry and the nodes without a ROS installation.
+// client, the registry and the nodes without a ROS installation. Typedefs use
+// the spellings Jazzy's rosapi reports (double/float for float64/float32).
 
 const { WebSocketServer } = require('ws');
 const { normalizeType } = require('../lib/type-registry');
@@ -20,13 +21,13 @@ function T(type, fields) {
 
 const TYPEDEFS = {
     'geometry_msgs/Twist': T('geometry_msgs/Twist', [['linear', 'geometry_msgs/Vector3'], ['angular', 'geometry_msgs/Vector3']]),
-    'geometry_msgs/Vector3': T('geometry_msgs/Vector3', [['x', 'float64'], ['y', 'float64'], ['z', 'float64']]),
+    'geometry_msgs/Vector3': T('geometry_msgs/Vector3', [['x', 'double'], ['y', 'double'], ['z', 'double']]),
     'std_msgs/String': T('std_msgs/String', [['data', 'string']]),
     'std_msgs/Header': T('std_msgs/Header', [['stamp', 'builtin_interfaces/Time'], ['frame_id', 'string']]),
     'builtin_interfaces/Time': T('builtin_interfaces/Time', [['sec', 'int32'], ['nanosec', 'uint32']]),
     'turtlesim/Pose': T('turtlesim/Pose', [
-        ['x', 'float32'], ['y', 'float32'], ['theta', 'float32'],
-        ['linear_velocity', 'float32'], ['angular_velocity', 'float32']
+        ['x', 'float'], ['y', 'float'], ['theta', 'float'],
+        ['linear_velocity', 'float'], ['angular_velocity', 'float']
     ]),
     'test_msgs/Arrays': T('test_msgs/Arrays', [
         ['header', 'std_msgs/Header'],
@@ -36,7 +37,7 @@ const TYPEDEFS = {
         ['points', 'geometry_msgs/Vector3', 0],
         ['count', 'int8']
     ]),
-    'turtlesim/TeleportAbsolute_Request': T('turtlesim/TeleportAbsolute_Request', [['x', 'float32'], ['y', 'float32'], ['theta', 'float32']]),
+    'turtlesim/TeleportAbsolute_Request': T('turtlesim/TeleportAbsolute_Request', [['x', 'float'], ['y', 'float'], ['theta', 'float']]),
     'turtlesim/TeleportAbsolute_Response': T('turtlesim/TeleportAbsolute_Response', []),
     'std_srvs/Trigger_Request': T('std_srvs/Trigger_Request', []),
     'std_srvs/Trigger_Response': T('std_srvs/Trigger_Response', [['success', 'bool'], ['message', 'string']]),
@@ -75,9 +76,13 @@ class MockRosbridge {
             { name: '/turtle1/pose', type: 'turtlesim/msg/Pose' },
             { name: '/turtle1/cmd_vel', type: 'geometry_msgs/msg/Twist' },
             { name: '/chatter', type: 'std_msgs/msg/String' },
-            { name: '/rosout', type: 'rcl_interfaces/msg/Log' },
-            { name: '/turtle1/rotate_absolute/_action/feedback', type: 'turtlesim/action/RotateAbsolute_FeedbackMessage' },
-            { name: '/turtle1/rotate_absolute/_action/status', type: 'action_msgs/msg/GoalStatusArray' }
+            { name: '/rosout', type: 'rcl_interfaces/msg/Log' }
+        ];
+        // Like Jazzy's rosapi, hidden topics (e.g. <action>/_action/feedback) are not listed.
+        this.interfaces = [
+            'geometry_msgs/msg/Twist', 'std_msgs/msg/String', 'turtlesim/msg/Pose',
+            'turtlesim/srv/TeleportAbsolute', 'std_srvs/srv/Trigger',
+            'turtlesim/action/RotateAbsolute', 'tf2_msgs/action/LookupTransform'
         ];
         this.nodes = ['/turtlesim', '/rosbridge_websocket', '/rosapi'];
 
@@ -325,6 +330,8 @@ class MockRosbridge {
             }
             case 'nodes':
                 return { nodes: this.nodes };
+            case 'interfaces':
+                return { interfaces: this.interfaces };
             case 'action_servers':
                 return { action_servers: [...this.actions.keys()] };
             case 'message_details':

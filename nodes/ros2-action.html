@@ -30,7 +30,7 @@ RED.nodes.registerType('ros2-action', {
         ROS2Suite.attachAutocomplete($('#node-input-action'), 'actions', ROS2Suite.connId,
             ROS2Suite.typeDetector($type, $hint, 'action server'), $hint);
         ROS2Suite.attachTemplateButton($('#ros2-action-template-btn'), $('#ros2-action-template'), ROS2Suite.connId,
-            function () { return $type.val() || ($type.attr('placeholder') !== 'auto-detect' && $type.attr('placeholder')); }, 'goal');
+            function () { return ROS2Suite.typeOf($type); }, 'goal');
     }
 });
 </script>
