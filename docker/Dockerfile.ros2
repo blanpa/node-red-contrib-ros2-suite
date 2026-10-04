@@ -6,6 +6,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ros-${ROS_DISTRO}-rosbridge-suite \
         ros-${ROS_DISTRO}-turtlesim \
+        ros-${ROS_DISTRO}-example-interfaces \
     && rm -rf /var/lib/apt/lists/*
 
 # turtlesim is a Qt app; render offscreen so it runs without a display

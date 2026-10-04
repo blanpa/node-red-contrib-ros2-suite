@@ -1,7 +1,7 @@
 'use strict';
 
-const { statusSetter, pick, useConnection } = require('../lib/node-common');
-const { fullType, similarNames } = require('../lib/type-registry');
+const { statusSetter, pick, useConnection, makeStamper } = require('../lib/node-common');
+const { fullType, similarNames, encodeBuffers } = require('../lib/type-registry');
 
 module.exports = function (RED) {
     function Ros2ActionNode(config) {
@@ -24,7 +24,8 @@ module.exports = function (RED) {
             return;
         }
 
-        const goals = new Map(); // goalId -> {action, handle, cancelRequested}
+        const stamp = makeStamper(node, conn, config.stamp);
+        const goals = new Map(); // goalId -> {action, handle, done, cancelRequested}
         const warnedGuess = new Set();
         let warnedCancel = false;
         let lastOutcome = null;
@@ -43,7 +44,7 @@ module.exports = function (RED) {
         async function resolveType(action, msg) {
             if (typeof msg.rosType === 'string' && msg.rosType.trim()) return msg.rosType.trim();
             if (configType) return configType;
-            let type = null;
+            let type;
             let names = [];
             try {
                 const info = await conn.registry.actionTypeInfo(action);
@@ -54,7 +55,7 @@ module.exports = function (RED) {
                 }
                 if (!type) names = (await conn.registry.listActions()).map((a) => a.name);
             } catch (err) {
-                throw new Error(`no action type for ${action} and rosapi could not tell (${err.message}) — set the type on the node or pass msg.rosType`);
+                throw new Error(`no action type for ${action} and rosapi could not tell (${err.message}) — set the type on the node or pass msg.rosType`, { cause: err });
             }
             if (!type) {
                 const similar = similarNames(action, names);
@@ -121,7 +122,8 @@ module.exports = function (RED) {
                 }
                 if (!conn.client.connected) throw new Error(`not connected to rosbridge at ${conn.url} — goal not sent`);
                 const type = await resolveType(action, msg);
-                const goal = msg.payload === undefined || msg.payload === null || msg.payload === '' ? {} : msg.payload;
+                let goal = msg.payload === undefined || msg.payload === null || msg.payload === '' ? {} : encodeBuffers(msg.payload);
+                goal = await stamp(type, 'goal', goal);
                 await check(type, goal);
 
                 const base = RED.util.cloneMessage(msg);
@@ -180,7 +182,7 @@ module.exports = function (RED) {
                     }
                 });
                 goalId = handle.goalId;
-                goals.set(goalId, { action, handle });
+                goals.set(goalId, { action, handle, done });
                 showIdle();
                 out(2, statusEvent('sent', goalId, action), {});
             } catch (err) {
@@ -193,7 +195,12 @@ module.exports = function (RED) {
         });
 
         node.on('close', (done) => {
-            for (const { handle } of goals.values()) handle.cancel();
+            // Cancel on the ROS side and complete the input messages; the client
+            // forgets the goals, so no result reaches the closed node.
+            for (const { handle, done: finished } of goals.values()) {
+                handle.abandon();
+                finished();
+            }
             goals.clear();
             release();
             setStatus.clear();

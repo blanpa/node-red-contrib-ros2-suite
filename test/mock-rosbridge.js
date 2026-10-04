@@ -37,6 +37,14 @@ const TYPEDEFS = {
         ['points', 'geometry_msgs/Vector3', 0],
         ['count', 'int8']
     ]),
+    'tf2_msgs/TFMessage': T('tf2_msgs/TFMessage', [['transforms', 'geometry_msgs/TransformStamped', 0]]),
+    'geometry_msgs/TransformStamped': T('geometry_msgs/TransformStamped', [
+        ['header', 'std_msgs/Header'], ['child_frame_id', 'string'], ['transform', 'geometry_msgs/Transform']
+    ]),
+    'geometry_msgs/Transform': T('geometry_msgs/Transform', [['translation', 'geometry_msgs/Vector3'], ['rotation', 'geometry_msgs/Quaternion']]),
+    'geometry_msgs/Quaternion': T('geometry_msgs/Quaternion', [['x', 'double'], ['y', 'double'], ['z', 'double'], ['w', 'double']]),
+    'test_msgs/Plan_Request': T('test_msgs/Plan_Request', [['start', 'test_msgs/Stamped'], ['tolerance', 'float32']]),
+    'test_msgs/Stamped': T('test_msgs/Stamped', [['header', 'std_msgs/Header'], ['value', 'float64']]),
     'turtlesim/TeleportAbsolute_Request': T('turtlesim/TeleportAbsolute_Request', [['x', 'float'], ['y', 'float'], ['theta', 'float']]),
     'turtlesim/TeleportAbsolute_Response': T('turtlesim/TeleportAbsolute_Response', []),
     'std_srvs/Trigger_Request': T('std_srvs/Trigger_Request', []),
@@ -45,6 +53,36 @@ const TYPEDEFS = {
     'turtlesim/RotateAbsolute_Result': T('turtlesim/RotateAbsolute_Result', [['delta', 'float32']]),
     'turtlesim/RotateAbsolute_Feedback': T('turtlesim/RotateAbsolute_Feedback', [['remaining', 'float32']])
 };
+
+// Minimal CBOR encoder, enough for the frames rosbridge sends with compression: "cbor".
+function cborHead(major, n) {
+    if (n < 24) return Buffer.from([(major << 5) | n]);
+    if (n < 0x100) return Buffer.from([(major << 5) | 24, n]);
+    if (n < 0x10000) { const b = Buffer.alloc(3); b[0] = (major << 5) | 25; b.writeUInt16BE(n, 1); return b; }
+    const b = Buffer.alloc(5); b[0] = (major << 5) | 26; b.writeUInt32BE(n, 1); return b;
+}
+
+function cborEncode(v) {
+    if (v === null) return Buffer.from([0xf6]);
+    if (v === true) return Buffer.from([0xf5]);
+    if (v === false) return Buffer.from([0xf4]);
+    if (typeof v === 'number') {
+        if (Number.isInteger(v) && Math.abs(v) < 2 ** 32) return v >= 0 ? cborHead(0, v) : cborHead(1, -1 - v);
+        const b = Buffer.alloc(9); b[0] = 0xfb; b.writeDoubleBE(v, 1); return b;
+    }
+    if (typeof v === 'string') { const s = Buffer.from(v, 'utf8'); return Buffer.concat([cborHead(3, s.length), s]); }
+    if (Buffer.isBuffer(v)) return Buffer.concat([cborHead(2, v.length), v]);
+    if (v instanceof Float32Array) { // RFC 8746 tag 85: float32, little endian
+        const bytes = Buffer.from(v.buffer, v.byteOffset, v.byteLength);
+        return Buffer.concat([cborHead(6, 85), cborHead(2, bytes.length), bytes]);
+    }
+    if (Array.isArray(v)) return Buffer.concat([cborHead(4, v.length), ...v.map(cborEncode)]);
+    const keys = Object.keys(v);
+    return Buffer.concat([cborHead(5, keys.length), ...keys.flatMap((k) => [cborEncode(k), cborEncode(v[k])])]);
+}
+
+const PARAM_FIELDS = [null, 'bool_value', 'integer_value', 'double_value', 'string_value',
+    'byte_array_value', 'bool_array_value', 'integer_array_value', 'double_array_value', 'string_array_value'];
 
 function typedefClosure(typeName) {
     const out = [];
@@ -77,6 +115,9 @@ class MockRosbridge {
             { name: '/turtle1/pose', type: 'turtlesim/msg/Pose' },
             { name: '/turtle1/cmd_vel', type: 'geometry_msgs/msg/Twist' },
             { name: '/chatter', type: 'std_msgs/msg/String' },
+            { name: '/arrays', type: 'test_msgs/msg/Arrays' },
+            { name: '/tf', type: 'tf2_msgs/msg/TFMessage' },
+            { name: '/tf_static', type: 'tf2_msgs/msg/TFMessage' },
             { name: '/rosout', type: 'rcl_interfaces/msg/Log' }
         ];
         // Like Jazzy's rosapi, hidden topics (e.g. <action>/_action/feedback) are not listed.
@@ -91,9 +132,48 @@ class MockRosbridge {
         this.services = new Map([
             ['/turtle1/teleport_absolute', { type: 'turtlesim/srv/TeleportAbsolute', handler: () => ({}) }],
             ['/reset', { type: 'std_srvs/srv/Empty', handler: () => ({}) }],
+            ['/plan', { type: 'test_msgs/srv/Plan', handler: () => ({}) }],
             ['/slow_service', { type: 'std_srvs/srv/Trigger', handler: () => MockRosbridge.NEVER }],
             ['/failing_service', { type: 'std_srvs/srv/Trigger', handler: () => { throw new Error('boom'); } }],
-            ['/turtlesim/get_parameters', { type: 'rcl_interfaces/srv/GetParameters', handler: () => ({ values: [] }) }]
+            ['/turtlesim/get_parameters', {
+                type: 'rcl_interfaces/srv/GetParameters',
+                handler: ({ names }) => ({ values: names.map((n) => this.parameters.get(n) || { type: 0 }) })
+            }],
+            ['/turtlesim/get_parameter_types', {
+                type: 'rcl_interfaces/srv/GetParameterTypes',
+                // uint8[] goes over the wire as base64, like in the real rosbridge
+                handler: ({ names }) => ({
+                    types: Buffer.from(names.map((n) => (this.parameters.get(n) || { type: 0 }).type)).toString('base64')
+                })
+            }],
+            ['/turtlesim/set_parameters', {
+                type: 'rcl_interfaces/srv/SetParameters',
+                handler: ({ parameters }) => ({
+                    results: parameters.map(({ name, value }) => {
+                        const cur = this.parameters.get(name);
+                        if (cur && cur.type !== value.type) return { successful: false, reason: `wrong type for ${name}` };
+                        this.parameters.set(name, { type: value.type, [PARAM_FIELDS[value.type]]: value[PARAM_FIELDS[value.type]] });
+                        return { successful: true, reason: '' };
+                    })
+                })
+            }],
+            ['/turtlesim/list_parameters', {
+                type: 'rcl_interfaces/srv/ListParameters',
+                handler: () => ({ result: { names: [...this.parameters.keys()], prefixes: [] } })
+            }],
+            ['/turtlesim/describe_parameters', {
+                type: 'rcl_interfaces/srv/DescribeParameters',
+                handler: ({ names }) => ({
+                    descriptors: names.map((name) => ({ name, type: (this.parameters.get(name) || { type: 0 }).type, description: `about ${name}`, read_only: false }))
+                })
+            }]
+        ]);
+        // name -> rcl_interfaces/msg/ParameterValue (only the field in use)
+        this.parameters = new Map([
+            ['background_r', { type: 2, integer_value: 69 }],
+            ['background_g', { type: 2, integer_value: 86 }],
+            ['gain', { type: 3, double_value: 0.5 }],
+            ['use_sim_time', { type: 1, bool_value: false }]
         ]);
 
         // name -> {type, feedback: [..], intervalMs, status, result, reject}
@@ -108,6 +188,8 @@ class MockRosbridge {
         ]);
         this._goals = new Map(); // goal id -> {timer, socket, action}
         this.clientServices = new Map(); // service -> socket
+        this.clientActions = new Map(); // action -> {socket, type}
+        this.clientGoals = new Map(); // goal id -> {feedback: [], resolve}
     }
 
     get url() {
@@ -124,12 +206,14 @@ class MockRosbridge {
             });
             this.wss.on('connection', (ws, req) => {
                 ws.subs = new Map(); // topic -> Set(id)
+                ws.cbor = new Set(); // topics subscribed with compression: "cbor"
                 ws.headers = req.headers;
                 this.sockets.add(ws);
                 ws.on('message', (data) => this._onFrame(ws, JSON.parse(data.toString())));
                 ws.on('close', () => {
                     this.sockets.delete(ws);
                     for (const [svc, s] of this.clientServices) if (s === ws) this.clientServices.delete(svc);
+                    for (const [act, a] of this.clientActions) if (a.socket === ws) this.clientActions.delete(act);
                 });
             });
         });
@@ -178,9 +262,12 @@ class MockRosbridge {
         this.received = [];
     }
 
+    /** Like rosbridge: with CBOR, uint8[] are byte strings (pass Buffers) and float32[] typed arrays (pass Float32Array). */
     publish(topic, msg) {
         for (const ws of this.sockets) {
-            if (ws.subs.has(topic) && ws.subs.get(topic).size) ws.send(JSON.stringify({ op: 'publish', topic, msg }));
+            if (!ws.subs.has(topic) || !ws.subs.get(topic).size) continue;
+            if (ws.cbor.has(topic)) ws.send(cborEncode({ op: 'publish', topic, msg }), { binary: true });
+            else ws.send(JSON.stringify({ op: 'publish', topic, msg }));
         }
     }
 
@@ -197,6 +284,23 @@ class MockRosbridge {
             this._pendingClientCalls.set(id, resolve);
             ws.send(JSON.stringify({ op: 'call_service', id, service, args }));
         });
+    }
+
+    /** Send a goal to an action the client advertised: {id, feedback: [], result: Promise<frame>}. */
+    sendClientGoal(action, args = {}) {
+        const a = this.clientActions.get(action);
+        if (!a) throw new Error(`mock: nobody advertises ${action}`);
+        const id = `action_goal:${action}:${++this._seq}`;
+        const goal = { id, feedback: [], resolve: null };
+        goal.result = new Promise((resolve) => { goal.resolve = resolve; });
+        this.clientGoals.set(id, goal);
+        a.socket.send(JSON.stringify({ op: 'send_action_goal', id, action, action_type: a.type, args, feedback: true }));
+        return goal;
+    }
+
+    cancelClientGoal(action, id) {
+        const a = this.clientActions.get(action);
+        if (a) a.socket.send(JSON.stringify({ op: 'cancel_action_goal', id, action }));
     }
 
     subscriberCount(topic) {
@@ -222,6 +326,7 @@ class MockRosbridge {
             case 'subscribe':
                 if (!ws.subs.has(m.topic)) ws.subs.set(m.topic, new Set());
                 ws.subs.get(m.topic).add(m.id);
+                if (m.compression === 'cbor') ws.cbor.add(m.topic);
                 break;
             case 'unsubscribe':
                 if (ws.subs.has(m.topic)) ws.subs.get(m.topic).delete(m.id);
@@ -241,6 +346,25 @@ class MockRosbridge {
             case 'unadvertise_service':
                 this.clientServices.delete(m.service);
                 break;
+            case 'advertise_action':
+                this.clientActions.set(m.action, { socket: ws, type: m.type });
+                break;
+            case 'unadvertise_action':
+                this.clientActions.delete(m.action);
+                break;
+            case 'action_feedback': {
+                const goal = this.clientGoals.get(m.id);
+                if (goal) goal.feedback.push(m.values);
+                break;
+            }
+            case 'action_result': {
+                const goal = this.clientGoals.get(m.id);
+                if (goal) {
+                    this.clientGoals.delete(m.id);
+                    goal.resolve(m);
+                }
+                break;
+            }
             case 'service_response': {
                 const resolve = this._pendingClientCalls.get(m.id);
                 if (resolve) {
@@ -370,5 +494,6 @@ class MockRosbridge {
 
 MockRosbridge.NEVER = Symbol('never');
 MockRosbridge.TYPEDEFS = TYPEDEFS;
+MockRosbridge.cborEncode = cborEncode;
 
 module.exports = { MockRosbridge };

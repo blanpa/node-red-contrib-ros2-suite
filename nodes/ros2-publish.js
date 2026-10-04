@@ -1,7 +1,7 @@
 'use strict';
 
-const { statusSetter, shortType, pick, useConnection } = require('../lib/node-common');
-const { similarNames } = require('../lib/type-registry');
+const { statusSetter, shortType, pick, useConnection, qosFromConfig, makeStamper } = require('../lib/node-common');
+const { similarNames, encodeBuffers } = require('../lib/type-registry');
 
 // rosbridge creates the ROS publisher on "advertise"; messages sent before
 // subscribers have matched it are silently dropped by DDS.
@@ -19,6 +19,7 @@ module.exports = function (RED) {
         const configType = (config.rosType || '').trim();
         const validation = ['strict', 'warn', 'off'].includes(config.validation) ? config.validation : 'strict';
         const latch = !!config.latch;
+        const qos = qosFromConfig(config);
         const allowOverride = !!config.allowOverride;
 
         if (!conn) {
@@ -27,6 +28,7 @@ module.exports = function (RED) {
             return;
         }
 
+        const stamp = makeStamper(node, conn, config.stamp);
         const handles = new Map(); // topic -> {type, handle, readyAt}
         let sent = 0;
         let lastType = configType;
@@ -41,7 +43,7 @@ module.exports = function (RED) {
             }
             const entry = {
                 type,
-                handle: conn.client.advertise(topic, type, { latch }),
+                handle: conn.client.advertise(topic, type, { latch, qos }),
                 readyAt: Date.now() + FRESH_ADVERTISE_DELAY
             };
             handles.set(topic, entry);
@@ -53,13 +55,13 @@ module.exports = function (RED) {
             if (configType) return configType;
             const cached = handles.get(topic);
             if (cached) return cached.type;
-            let advertised = null;
+            let advertised;
             let topics = [];
             try {
                 advertised = await conn.registry.topicType(topic);
                 if (!advertised) topics = (await conn.registry.listTopics()).map((t) => t.name);
             } catch (err) {
-                throw new Error(`no message type for ${topic} and rosapi could not tell (${err.message}) — set the type on the node or pass msg.rosType`);
+                throw new Error(`no message type for ${topic} and rosapi could not tell (${err.message}) — set the type on the node or pass msg.rosType`, { cause: err });
             }
             if (!advertised) {
                 const similar = similarNames(topic, topics);
@@ -70,6 +72,8 @@ module.exports = function (RED) {
         }
 
         async function prepare(type, payload) {
+            payload = encodeBuffers(payload); // Buffers travel as base64
+            payload = await stamp(type, 'msg', payload);
             // std_msgs-style wrappers: publish "hello" to std_msgs/String as {data: "hello"}
             const primitive = payload === null || ['string', 'number', 'boolean'].includes(typeof payload);
             if (!primitive && validation === 'off') return payload;
@@ -77,7 +81,7 @@ module.exports = function (RED) {
             try {
                 fields = await conn.registry.fieldNames(type);
             } catch (err) {
-                if (primitive) throw new Error(`msg.payload must be an object for ${type} (could not load its definition: ${err.message})`);
+                if (primitive) throw new Error(`msg.payload must be an object for ${type} (could not load its definition: ${err.message})`, { cause: err });
                 if (!warnedNoValidation) {
                     warnedNoValidation = true;
                     node.warn(`cannot validate ${type}: ${err.message} — publishing without validation`);

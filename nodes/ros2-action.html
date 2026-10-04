@@ -11,6 +11,7 @@ RED.nodes.registerType('ros2-action', {
         concurrent: { value: false },
         feedbackEvents: { value: 'none' },
         validation: { value: 'warn' },
+        stamp: { value: 'off' },
         allowOverride: { value: false }
     },
     inputs: 1,
@@ -28,6 +29,7 @@ RED.nodes.registerType('ros2-action', {
     oneditprepare: function () {
         var $type = $('#node-input-rosType');
         var $hint = $('#ros2-action-hint');
+        ROS2Suite.initOptions();
         ROS2Suite.attachAutocomplete($('#node-input-action'), 'actions', ROS2Suite.connId,
             ROS2Suite.typeDetector($type, $hint, 'action server'), $hint);
         ROS2Suite.attachTemplateButton($('#ros2-action-template-btn'), $('#ros2-action-template'), ROS2Suite.connId,
@@ -67,6 +69,14 @@ RED.nodes.registerType('ros2-action', {
         <select id="node-input-feedbackEvents" style="width: 70%">
             <option value="none">lifecycle events only (sent, executing, result …)</option>
             <option value="all">also one "feedback" event per feedback message</option>
+        </select>
+    </div>
+    <div class="form-row">
+        <label for="node-input-stamp"><i class="fa fa-clock-o"></i> Stamp</label>
+        <select id="node-input-stamp" style="width: 70%">
+            <option value="off">off — headers are sent as given</option>
+            <option value="system">fill empty header.stamp with the system time</option>
+            <option value="clock">fill empty header.stamp with ROS time from /clock (simulation)</option>
         </select>
     </div>
     <div class="form-row">
@@ -130,6 +140,8 @@ RED.nodes.registerType('ros2-action', {
     </ol>
     <p>All outputs carry the properties of the input message, so correlation fields survive.</p>
     <h3>Details</h3>
+    <p><i>Stamp</i> fills the empty <code>header.stamp</code> fields of the goal (e.g. the pose of a
+       <code>NavigateToPose</code> goal) with the system time or with ROS time from <code>/clock</code>.</p>
     <p>Without <i>concurrent goals</i>, a new goal while one is running is refused with an error
        (send <code>msg.cancel</code> first). A timeout cancels the goal and emits <code>failed</code>.
        <code>failed</code> means the goal never produced a normal result: rejected, timed out, or the

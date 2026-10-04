@@ -10,6 +10,7 @@ RED.nodes.registerType('ros2-service', {
         rosType: { value: '' },
         timeout: { value: '', validate: RED.validators.number(true) },
         validation: { value: 'warn' },
+        stamp: { value: 'off' },
         allowOverride: { value: false }
     },
     inputs: 1,
@@ -33,6 +34,7 @@ RED.nodes.registerType('ros2-service', {
         var $type = $('#node-input-rosType');
         var $hint = $('#ros2-service-hint');
         var $mode = $('#node-input-mode');
+        ROS2Suite.initOptions();
         ROS2Suite.attachAutocomplete($('#node-input-service'), 'services', ROS2Suite.connId,
             ROS2Suite.typeDetector($type, $hint, 'service'), $hint);
         var detected = function () { return ROS2Suite.typeOf($type); };
@@ -79,6 +81,14 @@ RED.nodes.registerType('ros2-service', {
         <label for="node-input-timeout"><i class="fa fa-clock-o"></i> Timeout</label>
         <input type="text" id="node-input-timeout" style="width: 70px"> <span id="ros2-service-timeout-label"></span>
     </div>
+    <div class="form-row ros2-service-client-only">
+        <label for="node-input-stamp"><i class="fa fa-clock-o"></i> Stamp</label>
+        <select id="node-input-stamp" style="width: 70%">
+            <option value="off">off — headers are sent as given</option>
+            <option value="system">fill empty header.stamp with the system time</option>
+            <option value="clock">fill empty header.stamp with ROS time from /clock (simulation)</option>
+        </select>
+    </div>
     <div class="form-row">
         <label for="node-input-validation"><i class="fa fa-check-square-o"></i> Validate</label>
         <select id="node-input-validation" style="width: 70%">
@@ -118,6 +128,8 @@ RED.nodes.registerType('ros2-service', {
         <dt>ros <span class="property-type">object</span></dt>
         <dd><code>{service, type, durationMs}</code></dd>
     </dl>
+    <p><i>Stamp</i> fills the empty <code>header.stamp</code> fields of the request with the system time
+       or with ROS time from <code>/clock</code>.</p>
     <p>Failures (service missing, timeout, rosbridge error) go to Catch nodes via <code>done(err)</code>.
        For a missing service the error lists similar service names. The timeout is also sent to rosbridge,
        so calls longer than rosbridge's own 5 s default work. <code>/rosapi/action_type</code> is refused

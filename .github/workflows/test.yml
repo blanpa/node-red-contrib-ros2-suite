@@ -5,11 +5,23 @@ on:
   pull_request:
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        node: [18, 20, 22]
+        node: [18, 20, 22, 24]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,3 +30,26 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+
+  # The same nodes against a real rosbridge with turtlesim, once per ROS 2 distro.
+  integration:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [humble, jazzy, kilted, rolling]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build ROS 2 ${{ matrix.distro }} with rosbridge and turtlesim
+        run: docker build -f docker/Dockerfile.ros2 --build-arg ROS_DISTRO=${{ matrix.distro }} -t ros2-suite-ros2 docker
+      - name: Start rosbridge
+        run: docker run -d --name ros2 -p 9090:9090 ros2-suite-ros2
+      - run: npm run test:integration
+      - name: rosbridge log
+        if: failure()
+        run: docker logs ros2
