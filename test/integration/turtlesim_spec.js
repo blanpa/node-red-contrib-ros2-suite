@@ -397,6 +397,29 @@ describe(`turtlesim through rosbridge at ${URL}`, function () {
         assert.strictEqual(msg.ros.static, false);
     });
 
+    it('stamps with ROS time from /clock', async function () {
+        // no simulator here: a publish node plays the clock, through ROS and back
+        const topic = '/nodered/it_stamped';
+        await load([
+            { id: 'clock', type: 'ros2-publish', connection: 'c1', topic: '/clock', rosType: 'rosgraph_msgs/msg/Clock', wires: [[]] },
+            { id: 'pub', type: 'ros2-publish', connection: 'c1', topic, rosType: 'geometry_msgs/msg/PoseStamped', stamp: 'clock', validation: 'strict', wires: [[]] },
+            { id: 'sub', type: 'ros2-subscribe', connection: 'c1', topic, rosType: 'geometry_msgs/msg/PoseStamped', wires: [['out']] },
+            { id: 'out', type: 'helper' }
+        ]);
+        const pub = helper.getNode('pub');
+        pub.on('call:warn', () => {}); // "no message on /clock yet" until the clock arrives
+        const got = collect(helper.getNode('out'));
+        await until(() => {
+            helper.getNode('clock').receive({ payload: { clock: { sec: 1234, nanosec: 5678 } } });
+            pub.receive({ payload: { header: { frame_id: 'map' }, pose: { position: { x: 1 } } } });
+            return got.some((m) => m.payload.header.stamp.sec === 1234);
+        }, 10000, 'a message stamped with the simulated time');
+        const stamped = got.find((m) => m.payload.header.stamp.sec === 1234).payload;
+        assert.deepStrictEqual(stamped.header.stamp, { sec: 1234, nanosec: 5678 });
+        assert.strictEqual(stamped.header.frame_id, 'map');
+        assert.strictEqual(stamped.pose.position.x, 1);
+    });
+
     describe('action server', function () {
         let type;
 

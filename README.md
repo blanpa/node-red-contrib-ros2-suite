@@ -417,7 +417,7 @@ hidden action topics and the `action_type` crash of real rosapi.
 
 The integration tests in `test/integration/` drive the nodes against real turtlesim: subscribe
 (JSON and CBOR), publish, service client and server, action client and server with cancel,
-parameters, QoS, header stamps, TF, binary data and a reconnect. Start the ROS side first (`ROS_DISTRO` selects the distro; set
+parameters, QoS, header stamps (system time and `/clock`), TF, binary data and a reconnect. Start the ROS side first (`ROS_DISTRO` selects the distro; set
 `ROSBRIDGE_URL` to test against another rosbridge):
 
 ```sh

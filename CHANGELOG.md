@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 ### Added
 - **ros2-param** node: get, set, list and describe the parameters of a ROS 2 node, with
