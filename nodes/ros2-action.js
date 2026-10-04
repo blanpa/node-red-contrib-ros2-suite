@@ -1,7 +1,7 @@
 'use strict';
 
-const { statusSetter, pick, useConnection } = require('../lib/node-common');
-const { fullType, similarNames } = require('../lib/type-registry');
+const { statusSetter, pick, useConnection, makeStamper, makeValidator } = require('../lib/node-common');
+const { fullType, similarNames, encodeBuffers } = require('../lib/type-registry');
 
 module.exports = function (RED) {
     function Ros2ActionNode(config) {
@@ -24,7 +24,8 @@ module.exports = function (RED) {
             return;
         }
 
-        const goals = new Map(); // goalId -> {action, handle, cancelRequested}
+        const stamp = makeStamper(node, conn, config.stamp);
+        const goals = new Map(); // goalId -> {action, handle, done, cancelRequested}
         const warnedGuess = new Set();
         let warnedCancel = false;
         let lastOutcome = null;
@@ -43,7 +44,7 @@ module.exports = function (RED) {
         async function resolveType(action, msg) {
             if (typeof msg.rosType === 'string' && msg.rosType.trim()) return msg.rosType.trim();
             if (configType) return configType;
-            let type = null;
+            let type;
             let names = [];
             try {
                 const info = await conn.registry.actionTypeInfo(action);
@@ -54,7 +55,7 @@ module.exports = function (RED) {
                 }
                 if (!type) names = (await conn.registry.listActions()).map((a) => a.name);
             } catch (err) {
-                throw new Error(`no action type for ${action} and rosapi could not tell (${err.message}) — set the type on the node or pass msg.rosType`);
+                throw new Error(`no action type for ${action} and rosapi could not tell (${err.message}) — set the type on the node or pass msg.rosType`, { cause: err });
             }
             if (!type) {
                 const similar = similarNames(action, names);
@@ -67,20 +68,7 @@ module.exports = function (RED) {
             return type;
         }
 
-        async function check(type, goal) {
-            if (validation === 'off') return;
-            let result;
-            try {
-                result = await conn.registry.validate(type, goal, 'goal');
-            } catch (_) {
-                return;
-            }
-            for (const w of result.warnings) node.warn(w);
-            if (!result.errors.length) return;
-            const text = `invalid goal for ${type}: ${result.errors.join('; ')}`;
-            if (validation === 'strict') throw Object.assign(new Error(text), { validation: result.errors });
-            node.warn(text);
-        }
+        const check = makeValidator(node, conn, validation);
 
         function cancel(msg, send, done) {
             const action = pick(msg.action, configAction, allowOverride);
@@ -121,8 +109,9 @@ module.exports = function (RED) {
                 }
                 if (!conn.client.connected) throw new Error(`not connected to rosbridge at ${conn.url} — goal not sent`);
                 const type = await resolveType(action, msg);
-                const goal = msg.payload === undefined || msg.payload === null || msg.payload === '' ? {} : msg.payload;
-                await check(type, goal);
+                let goal = msg.payload === undefined || msg.payload === null || msg.payload === '' ? {} : encodeBuffers(msg.payload);
+                goal = await stamp(type, 'goal', goal);
+                await check(type, goal, 'goal');
 
                 const base = RED.util.cloneMessage(msg);
                 let goalId = null;
@@ -180,7 +169,7 @@ module.exports = function (RED) {
                     }
                 });
                 goalId = handle.goalId;
-                goals.set(goalId, { action, handle });
+                goals.set(goalId, { action, handle, done });
                 showIdle();
                 out(2, statusEvent('sent', goalId, action), {});
             } catch (err) {
@@ -193,8 +182,14 @@ module.exports = function (RED) {
         });
 
         node.on('close', (done) => {
-            for (const { handle } of goals.values()) handle.cancel();
+            // Cancel on the ROS side and complete the input messages; the client
+            // forgets the goals, so no result reaches the closed node.
+            for (const { handle, done: finished } of goals.values()) {
+                handle.abandon();
+                finished();
+            }
             goals.clear();
+            stamp.close();
             release();
             setStatus.clear();
             done();

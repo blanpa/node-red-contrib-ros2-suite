@@ -1,7 +1,10 @@
 'use strict';
 
-const { statusSetter, shortType, pick, useConnection } = require('../lib/node-common');
-const { fullType, similarNames, unsafeService } = require('../lib/type-registry');
+const { statusSetter, pick, useConnection, makeStamper, makeValidator } = require('../lib/node-common');
+const { fullType, similarNames, unsafeService, encodeBuffers } = require('../lib/type-registry');
+
+// Unanswered requests are kept until the timeout; with "no timeout" this caps them.
+const MAX_OPEN_REQUESTS = 1000;
 
 module.exports = function (RED) {
     function Ros2ServiceNode(config) {
@@ -25,20 +28,9 @@ module.exports = function (RED) {
             ? timeoutSec * 1000
             : conn.serviceTimeout;
 
-        async function check(type, value, kind) {
-            if (validation === 'off' || !type) return;
-            let result;
-            try {
-                result = await conn.registry.validate(type, value, kind);
-            } catch (err) {
-                return; // no definition available: let rosbridge decide
-            }
-            for (const w of result.warnings) node.warn(w);
-            if (!result.errors.length) return;
-            const text = `invalid ${kind} for ${shortType(type)}: ${result.errors.join('; ')}`;
-            if (validation === 'strict') throw Object.assign(new Error(text), { validation: result.errors });
-            node.warn(text);
-        }
+        const stamp = makeStamper(node, conn, config.stamp);
+
+        const check = makeValidator(node, conn, validation);
 
         if (mode === 'client') setupClient();
         else setupServer();
@@ -79,7 +71,8 @@ module.exports = function (RED) {
                     if (!conn.client.connected) throw new Error(`not connected to rosbridge at ${conn.url} — call to ${service} not sent`);
                     let type = (typeof msg.rosType === 'string' && msg.rosType.trim()) || configType || null;
                     if (!type) type = await conn.registry.serviceType(service).catch(() => null);
-                    const request = msg.payload === undefined || msg.payload === null || msg.payload === '' ? {} : msg.payload;
+                    let request = msg.payload === undefined || msg.payload === null || msg.payload === '' ? {} : encodeBuffers(msg.payload);
+                    if (type) request = await stamp(type, 'request', request);
                     await check(type, request, 'request');
                     const response = await conn.client.callService(service, request, {
                         type: type ? fullType(type, 'srv') : undefined,
@@ -104,6 +97,7 @@ module.exports = function (RED) {
                 if (state === 'connected') showIdle();
             });
             node.on('close', (done) => {
+                stamp.close();
                 release();
                 setStatus.clear();
                 done();
@@ -117,6 +111,7 @@ module.exports = function (RED) {
             let seq = 0;
             let served = 0;
             let server = null;
+            let warnedOverflow = false;
 
             function showIdle() {
                 if (open.size) setStatus('busy', `${open.size} request${open.size > 1 ? 's' : ''} open`);
@@ -152,6 +147,16 @@ module.exports = function (RED) {
                     }, timeout);
                 }
                 open.set(requestId, entry);
+                if (open.size > MAX_OPEN_REQUESTS) {
+                    const [oldestId, oldest] = open.entries().next().value;
+                    open.delete(oldestId);
+                    clearTimeout(oldest.timer);
+                    errorResponse('too many unanswered requests in the Node-RED flow').then((v) => oldest.respond(v, false));
+                    if (!warnedOverflow) {
+                        warnedOverflow = true;
+                        node.warn(`${configService}: more than ${MAX_OPEN_REQUESTS} requests are waiting for an answer from the flow — the oldest ones are failed. Wire the response back into this node, or set a timeout`);
+                    }
+                }
                 showIdle();
                 node.send({
                     payload: args,
@@ -176,7 +181,7 @@ module.exports = function (RED) {
                 }
                 const entry = open.get(ref.requestId);
                 if (!entry) {
-                    done(new Error(`request ${ref.requestId} was already answered or timed out`));
+                    done(new Error(`request ${ref.requestId} was already answered, timed out or lost with the connection`));
                     return;
                 }
                 open.delete(ref.requestId);
@@ -187,7 +192,7 @@ module.exports = function (RED) {
                         entry.respond(await errorResponse(text), false);
                         node.warn(`${configService}: answered request with an error: ${text}`);
                     } else {
-                        const response = msg.payload === undefined || msg.payload === null ? {} : msg.payload;
+                        const response = msg.payload === undefined || msg.payload === null ? {} : encodeBuffers(msg.payload);
                         await check(configType, response, 'response').catch(async (err) => {
                             entry.respond(await errorResponse(err.message), false);
                             throw err;
@@ -204,7 +209,16 @@ module.exports = function (RED) {
             });
 
             const release = useConnection(node, conn, setStatus, (state) => {
-                if (state === 'connected') showIdle();
+                if (state === 'connected') {
+                    showIdle();
+                    return;
+                }
+                // rosbridge fails the ROS callers when its client goes away, so
+                // these requests cannot be answered any more
+                if (!open.size) return;
+                node.warn(`${configService}: ${open.size} open request${open.size > 1 ? 's were' : ' was'} lost with the connection to rosbridge`);
+                for (const { timer } of open.values()) clearTimeout(timer);
+                open.clear();
             });
             node.on('close', (done) => {
                 for (const { respond, timer } of open.values()) {
@@ -212,6 +226,7 @@ module.exports = function (RED) {
                     respond({}, false);
                 }
                 open.clear();
+                stamp.close();
                 if (server) server.unadvertise();
                 release();
                 setStatus.clear();

@@ -2,9 +2,13 @@
 
 const { RosbridgeClient } = require('../lib/rosbridge-client');
 const { TypeRegistry } = require('../lib/type-registry');
+const { listParameters, normalizeNode } = require('../lib/params');
+const { TfBuffer } = require('../lib/tf');
 
 const KINDS = new Set(['msg', 'request', 'response', 'goal', 'result', 'feedback']);
 const PROBE_IDLE = 60000;
+// A redeploy removes and re-adds the nodes of a flow; keep the socket across that gap.
+const UNUSED_GRACE = 5000;
 
 function buildUrl(config) {
     const url = (config.url || '').trim();
@@ -64,6 +68,8 @@ module.exports = function (RED) {
         node.users = new Set();
 
         let lastLogged = null;
+        let clockTime = null; // latest /clock message
+        let tf = null;        // transform tree, while tf nodes exist
         node.client.on('state', (state, err) => {
             if (state === 'connected') {
                 node.log(`connected to ${node.url}`);
@@ -75,18 +81,98 @@ module.exports = function (RED) {
             }
         });
         node.client.on('warning', (text) => node.warn(text));
+        node.client.on('state', (state) => {
+            if (state === 'connected') return;
+            // what was known may be outdated by the time the connection is back
+            clockTime = null;
+            if (tf) tf.clear();
+        });
 
         // Connect lazily: an unused config node should not hold a socket open.
+        let idleTimer = null;
+        const closeWhenUnused = (after) => {
+            clearTimeout(idleTimer);
+            idleTimer = null;
+            if (node.users.size) return;
+            idleTimer = setTimeout(() => {
+                idleTimer = null;
+                if (!node.users.size) node.client.close();
+            }, after);
+            idleTimer.unref();
+        };
         node.register = (user) => {
             node.users.add(user.id);
+            clearTimeout(idleTimer);
+            idleTimer = null;
             if (!node.client._wanted) node.client.connect();
         };
         node.deregister = (user) => {
             node.users.delete(user.id);
+            closeWhenUnused(UNUSED_GRACE);
         };
-        node.ensureConnected = (timeout) => ensureConnected(node.client, timeout);
+        // For the editor: connects an unused connection only for as long as it is queried.
+        node.ensureConnected = (timeout) => {
+            closeWhenUnused(PROBE_IDLE);
+            return ensureConnected(node.client, timeout);
+        };
+
+        // Current time as {sec, nanosec, source}: ROS time from /clock (simulation)
+        // once a clock message has arrived, the system time otherwise. /clock is
+        // subscribed while nodes that stamp with it exist.
+        let clockUsers = 0;
+        let clockUnsubscribe = null;
+        node.clockAcquire = () => {
+            if (clockUsers++ === 0) {
+                // simulators publish /clock at up to 1 kHz; 100 Hz is plenty for stamps
+                clockUnsubscribe = node.client.subscribe('/clock', (m) => { clockTime = m && m.clock; },
+                    { type: 'rosgraph_msgs/msg/Clock', throttle_rate: 10 });
+            }
+        };
+        node.clockRelease = () => {
+            if (clockUsers === 0 || --clockUsers > 0) return;
+            clockUnsubscribe();
+            clockUnsubscribe = null;
+            clockTime = null;
+        };
+        node.rosTime = (source) => {
+            if (source === 'clock' && clockTime) {
+                return { sec: clockTime.sec || 0, nanosec: clockTime.nanosec || 0, source: 'clock' };
+            }
+            const ms = Date.now(); // follows steps of the system clock (NTP), unlike performance.now()
+            const sec = Math.floor(ms / 1000);
+            return { sec, nanosec: (ms - sec * 1000) * 1e6, source: 'system' };
+        };
+
+        // One transform tree per connection, fed while tf nodes exist.
+        let tfUsers = 0;
+        let tfSubscriptions = [];
+        node.tfAcquire = () => {
+            if (!tf) {
+                const buffer = tf = new TfBuffer();
+                const type = 'tf2_msgs/msg/TFMessage';
+                tfSubscriptions = [
+                    node.client.subscribe('/tf', (m) => buffer.add(m.transforms, false), { type, compression: 'cbor' }),
+                    // static transforms are latched: only a transient-local subscription gets the ones sent earlier
+                    node.client.subscribe('/tf_static', (m) => buffer.add(m.transforms, true), {
+                        type,
+                        compression: 'cbor',
+                        qos: { history: 'keep_last', depth: 100, reliability: 'reliable', durability: 'transient_local' }
+                    })
+                ];
+            }
+            tfUsers++;
+            return tf;
+        };
+        node.tfRelease = () => {
+            if (--tfUsers > 0) return;
+            tfUsers = 0;
+            for (const unsubscribe of tfSubscriptions) unsubscribe();
+            tfSubscriptions = [];
+            tf = null;
+        };
 
         node.on('close', (removed, done) => {
+            clearTimeout(idleTimer);
             node.client.close().then(() => done(), () => done());
         });
     }
@@ -106,6 +192,11 @@ module.exports = function (RED) {
         services: (reg) => reg.listServices(),
         actions: (reg) => reg.listActions(),
         nodes: (reg) => reg.listNodes(),
+        params: (reg, params) => {
+            const rosNode = normalizeNode(params.node);
+            if (!rosNode) throw new Error('no ROS node given');
+            return listParameters(reg.client, rosNode, reg.timeout);
+        },
         template: async (reg, params) => {
             const type = String(params.type || '').trim();
             const kind = String(params.kind || 'msg');
@@ -159,9 +250,12 @@ module.exports = function (RED) {
         if (!/^wss?:\/\/[^/\s]+/i.test(url)) throw new Error(`not a WebSocket URL: ${url}`);
         let token = typeof body.token === 'string' && body.token ? body.token : null;
         if (!token && body.id) {
-            // unchanged token: reuse the deployed node's credential
+            // Unchanged token: reuse the deployed node's credential, but only for
+            // the URL it was configured for — never send it to another server.
             const deployed = RED.nodes.getNode(body.id);
-            if (deployed && deployed.type === 'ros2-connection') token = deployed.credentials && deployed.credentials.token;
+            if (deployed && deployed.type === 'ros2-connection' && deployed.url === url) {
+                token = deployed.credentials && deployed.credentials.token;
+            }
         }
         const verify = verifyTls(body);
         const key = JSON.stringify([url, token, verify]);

@@ -1,0 +1,99 @@
+<script type="text/javascript">
+RED.nodes.registerType('ros2-tf', {
+    category: 'ROS 2',
+    color: '#4b8bbe',
+    defaults: {
+        name: { value: '' },
+        connection: { value: '', type: 'ros2-connection' },
+        operation: { value: 'lookup' },
+        target: { value: '' },
+        source: { value: '' },
+        maxAge: { value: '', validate: RED.validators.number(true) },
+        allowOverride: { value: false }
+    },
+    inputs: 1,
+    outputs: 1,
+    icon: 'font-awesome/fa-arrows',
+    paletteLabel: 'tf',
+    label: function () {
+        if (this.name) return this.name;
+        if (this.operation === 'frames') return 'tf frames';
+        return this.target && this.source ? 'tf ' + this.source + ' → ' + this.target : 'ros2 tf';
+    },
+    labelStyle: function () {
+        return this.name ? 'node_label_italic' : '';
+    },
+    oneditprepare: function () {
+        $('#node-input-operation').on('change', function () {
+            $('.ros2-tf-lookup').toggle($(this).val() !== 'frames');
+        }).trigger('change');
+    }
+});
+</script>
+
+<script type="text/html" data-template-name="ros2-tf">
+    <div class="form-row">
+        <label for="node-input-connection"><i class="fa fa-plug"></i> Connection</label>
+        <input type="text" id="node-input-connection">
+    </div>
+    <div class="form-row">
+        <label for="node-input-operation"><i class="fa fa-wrench"></i> Operation</label>
+        <select id="node-input-operation" style="width: 70%">
+            <option value="lookup">lookup — transform between two frames</option>
+            <option value="frames">frames — list the TF tree</option>
+        </select>
+    </div>
+    <div class="form-row ros2-tf-lookup">
+        <label for="node-input-target"><i class="fa fa-crosshairs"></i> Target</label>
+        <input type="text" id="node-input-target" placeholder="map (or msg.target)">
+    </div>
+    <div class="form-row ros2-tf-lookup">
+        <label for="node-input-source"><i class="fa fa-dot-circle-o"></i> Source</label>
+        <input type="text" id="node-input-source" placeholder="base_link (or msg.source)">
+    </div>
+    <div class="form-row ros2-tf-lookup">
+        <label for="node-input-maxAge"><i class="fa fa-clock-o"></i> Max age</label>
+        <input type="text" id="node-input-maxAge" style="width: 70px"> s (empty = any age)
+    </div>
+    <div class="form-row ros2-tf-lookup">
+        <input type="checkbox" id="node-input-allowOverride" style="display: inline-block; width: auto; vertical-align: top; margin-left: 105px;">
+        <label for="node-input-allowOverride" style="width: auto;">msg.target / msg.source override the configured frames</label>
+    </div>
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name">
+    </div>
+</script>
+
+<script type="text/html" data-help-name="ros2-tf">
+    <p>Looks up the transform between two frames of the ROS 2 TF tree, e.g. where the robot
+       (<code>base_link</code>) is in the map.</p>
+    <h3>Inputs</h3>
+    <dl class="message-properties">
+        <dt class="optional">target, source <span class="property-type">string</span></dt>
+        <dd>frame names; used when the node has none configured, or when overriding is enabled.</dd>
+        <dt class="optional">operation <span class="property-type">string</span></dt>
+        <dd><code>lookup</code> or <code>frames</code> — overrides the configured operation.</dd>
+    </dl>
+    <h3>Outputs</h3>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">object | array</span></dt>
+        <dd><b>lookup</b>: a <code>geometry_msgs/TransformStamped</code> —
+            <code>{header: {stamp, frame_id: target}, child_frame_id: source, transform: {translation, rotation}}</code>.
+            The transform is the pose of the source frame in the target frame; it maps points from source
+            to target. <b>frames</b>: <code>[{frame, parent, static}]</code>.</dd>
+        <dt>ros <span class="property-type">object</span></dt>
+        <dd><code>{target, source, ageMs, static, rpy: {roll, pitch, yaw}}</code> — angles in radians;
+            <code>ageMs</code> is the age of the oldest non-static transform used.</dd>
+    </dl>
+    <h3>Details</h3>
+    <p>The connection subscribes to <code>/tf</code> and <code>/tf_static</code> while at least one tf
+       node exists and keeps the latest transform of every frame. A lookup combines these latest
+       transforms; it does not interpolate to a point in time. Trigger the node with an inject node to
+       poll, e.g. every 100 ms.</p>
+    <p>The transform tree shares the connection's <code>/tf</code> and <code>/tf_static</code>
+       subscriptions with subscribe nodes on those topics: they are received CBOR-encoded, and
+       <code>/tf_static</code> with the QoS static transforms need (reliable, transient local).</p>
+    <p>Errors go to Catch nodes: an unknown frame (with similar names as suggestions), frames that are
+       not connected, and a transform older than <i>Max age</i>.</p>
+</script>

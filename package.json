@@ -1,7 +1,7 @@
 {
   "name": "node-red-contrib-ros2-suite",
-  "version": "0.1.0",
-  "description": "Node-RED nodes for ROS 2 over rosbridge — subscribe, publish, services (client and server), actions and discovery. No local ROS install, no rclnodejs.",
+  "version": "0.2.0",
+  "description": "Node-RED nodes for ROS 2 over rosbridge — subscribe, publish, services and actions (client and server), parameters, TF and discovery. No local ROS install, no rclnodejs.",
   "keywords": [
     "node-red",
     "ros",
@@ -28,7 +28,8 @@
     "nodes/",
     "examples/",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "node-red": {
     "version": ">=3.0.0",
@@ -38,16 +39,26 @@
       "ros2-publish": "nodes/ros2-publish.js",
       "ros2-service": "nodes/ros2-service.js",
       "ros2-action": "nodes/ros2-action.js",
-      "ros2-browse": "nodes/ros2-browse.js"
+      "ros2-action-server": "nodes/ros2-action-server.js",
+      "ros2-browse": "nodes/ros2-browse.js",
+      "ros2-param": "nodes/ros2-param.js",
+      "ros2-tf": "nodes/ros2-tf.js"
     }
   },
   "scripts": {
-    "test": "mocha \"test/**/*_spec.js\" --exit"
+    "test": "mocha \"test/*_spec.js\" --exit",
+    "test:integration": "mocha \"test/integration/*_spec.js\" --exit --timeout 30000",
+    "lint": "eslint .",
+    "coverage": "c8 --reporter=text --reporter=lcov npm test"
   },
   "dependencies": {
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "c8": "^12.0.0",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0",
     "mocha": "^11.0.0",
     "node-red": "^4.0.0",
     "node-red-node-test-helper": "^0.3.4"

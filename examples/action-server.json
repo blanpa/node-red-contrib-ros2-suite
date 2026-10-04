@@ -1,0 +1,185 @@
+[
+    {
+        "id": "tab_ros2_action_server",
+        "type": "tab",
+        "label": "ROS 2 action server",
+        "disabled": false,
+        "info": "Node-RED provides the action `/nodered/fibonacci` (`example_interfaces/action/Fibonacci`).\n\nThe type comes from the ROS package `example_interfaces` (`sudo apt install ros-$ROS_DISTRO-example-interfaces`; part of the Docker setup in `docker/`).\n\nCall it from ROS:\n\n`ros2 action send_goal --feedback /nodered/fibonacci example_interfaces/action/Fibonacci \"{order: 8}\"`\n\nor with the inject node below, which goes through the action client node."
+    },
+    {
+        "id": "conn_action_server",
+        "type": "ros2-connection",
+        "name": "rosbridge",
+        "host": "localhost",
+        "port": 9090,
+        "tls": false,
+        "verifyTls": true,
+        "path": "",
+        "url": "",
+        "reconnectMin": 1,
+        "reconnectMax": 30,
+        "serviceTimeout": 10
+    },
+    {
+        "id": "as_c_server",
+        "type": "comment",
+        "z": "tab_ros2_action_server",
+        "name": "Action server: every goal comes out of the first output",
+        "x": 250,
+        "y": 60,
+        "wires": [],
+        "info": "The function node sends one feedback message per step (`msg.feedback = true`) and then the result. Both go back into the action server node; `msg._ros2` routes them to the goal."
+    },
+    {
+        "id": "as_server",
+        "type": "ros2-action-server",
+        "z": "tab_ros2_action_server",
+        "name": "",
+        "connection": "conn_action_server",
+        "action": "/nodered/fibonacci",
+        "rosType": "example_interfaces/action/Fibonacci",
+        "validation": "strict",
+        "x": 190,
+        "y": 120,
+        "wires": [
+            [
+                "as_compute"
+            ],
+            [
+                "as_dbg_cancel"
+            ]
+        ]
+    },
+    {
+        "id": "as_compute",
+        "type": "function",
+        "z": "tab_ros2_action_server",
+        "name": "fibonacci with feedback",
+        "func": "// msg.payload is the goal: {order}\nconst sequence = [0, 1];\nfor (let i = 1; i < msg.payload.order; i++) {\n    sequence.push(sequence[i] + sequence[i - 1]);\n    // feedback: the goal keeps running\n    node.send({ ...msg, feedback: true, payload: { sequence: [...sequence] } });\n    await new Promise((resolve) => setTimeout(resolve, 300)); // pretend to work\n}\n// the result ends the goal (msg.status defaults to \"succeeded\")\nmsg.payload = { sequence };\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 450,
+        "y": 100,
+        "wires": [
+            [
+                "as_server"
+            ]
+        ]
+    },
+    {
+        "id": "as_dbg_cancel",
+        "type": "debug",
+        "z": "tab_ros2_action_server",
+        "name": "cancel requests",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 440,
+        "y": 160,
+        "wires": []
+    },
+    {
+        "id": "as_c_client",
+        "type": "comment",
+        "z": "tab_ros2_action_server",
+        "name": "Try it: the action client sends a goal to the server above",
+        "x": 250,
+        "y": 240,
+        "wires": [],
+        "info": ""
+    },
+    {
+        "id": "as_inject",
+        "type": "inject",
+        "z": "tab_ros2_action_server",
+        "name": "order 8",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"order\":8}",
+        "payloadType": "json",
+        "x": 130,
+        "y": 300,
+        "wires": [
+            [
+                "as_client"
+            ]
+        ]
+    },
+    {
+        "id": "as_client",
+        "type": "ros2-action",
+        "z": "tab_ros2_action_server",
+        "name": "",
+        "connection": "conn_action_server",
+        "action": "/nodered/fibonacci",
+        "rosType": "example_interfaces/action/Fibonacci",
+        "timeout": "",
+        "concurrent": false,
+        "feedbackEvents": "none",
+        "validation": "strict",
+        "stamp": "off",
+        "allowOverride": false,
+        "x": 340,
+        "y": 300,
+        "wires": [
+            [
+                "as_dbg_feedback"
+            ],
+            [
+                "as_dbg_result"
+            ],
+            []
+        ]
+    },
+    {
+        "id": "as_dbg_feedback",
+        "type": "debug",
+        "z": "tab_ros2_action_server",
+        "name": "feedback",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 580,
+        "y": 280,
+        "wires": []
+    },
+    {
+        "id": "as_dbg_result",
+        "type": "debug",
+        "z": "tab_ros2_action_server",
+        "name": "result",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 570,
+        "y": 320,
+        "wires": []
+    }
+]

@@ -56,12 +56,16 @@
             .catch(function (err) { if (err.notDeployed) return probe(); throw err; });
     }
 
-    function list(connId, kind) {
+    function list(connId, kind, params) {
         var cfg = RED.nodes.node(connId);
-        var key = connId + ':' + kind + ':' + (cfg && cfg.changed ? JSON.stringify(probeParams(cfg)) : 'deployed');
+        var key = connId + ':' + kind + ':' + JSON.stringify(params || {}) + ':' +
+            (cfg && cfg.changed ? JSON.stringify(probeParams(cfg)) : 'deployed');
         var hit = cache[key];
         if (hit && Date.now() - hit.at < TTL) return hit.promise;
-        var promise = endpoint(connId, kind);
+        // plain name lists (nodes) get the same {name} shape as topics, services and actions
+        var promise = endpoint(connId, kind, params).then(function (entries) {
+            return entries.map(function (e) { return typeof e === 'string' ? { name: e } : e; });
+        });
         cache[key] = { at: Date.now(), promise: promise };
         promise.catch(function () { delete cache[key]; });
         return promise;
@@ -79,15 +83,18 @@
     }
 
     /**
-     * Autocomplete for topics | services | actions. onPick(entry|null) fires on
-     * selection and when a typed name matches (or no longer matches) an entry.
+     * Autocomplete for topics | services | actions | nodes | params. onPick(entry|null)
+     * fires on selection and when a typed name matches (or no longer matches) an entry.
+     * getParams() supplies extra query parameters (params: {node}); null means
+     * "nothing to list yet".
      */
-    function attachAutocomplete($input, kind, getConnId, onPick, $hint) {
+    function attachAutocomplete($input, kind, getConnId, onPick, $hint, getParams) {
         function detect() {
             var name = ($input.val() || '').trim();
             var id = getConnId();
-            if (!name || !usable(id)) { if (onPick) onPick(null, name); return; }
-            list(id, kind).then(function (entries) {
+            var params = getParams ? getParams() : undefined;
+            if (!name || !usable(id) || params === null) { if (onPick) onPick(null, name); return; }
+            list(id, kind, params).then(function (entries) {
                 var entry = entries.filter(function (e) { return e.name === name; })[0] || null;
                 if (onPick) onPick(entry, name);
             }).catch(function (err) {
@@ -113,7 +120,12 @@
                     respond([]);
                     return;
                 }
-                list(id, kind).then(function (entries) {
+                var params = getParams ? getParams() : undefined;
+                if (params === null) {
+                    respond([]);
+                    return;
+                }
+                list(id, kind, params).then(function (entries) {
                     var term = (req.term || '').toLowerCase();
                     var hits = entries.filter(function (e) {
                         return !term || e.name.toLowerCase().indexOf(term) !== -1 ||
@@ -183,7 +195,24 @@
         });
     }
 
+    /** QoS and stamp selects: defaults for nodes saved before the options existed, custom row toggle. */
+    function initOptions() {
+        var $qos = $('#node-input-qos');
+        if ($qos.length) {
+            if (!$qos.val()) $qos.val('auto');
+            if (!$('#node-input-qosReliability').val()) $('#node-input-qosReliability').val('reliable');
+            if (!$('#node-input-qosDurability').val()) $('#node-input-qosDurability').val('volatile');
+            if (!$('#node-input-qosDepth').val()) $('#node-input-qosDepth').val(10);
+            $qos.on('change', function () {
+                $('.ros2-qos-custom').toggle($qos.val() === 'custom');
+            }).trigger('change');
+        }
+        var $stamp = $('#node-input-stamp');
+        if ($stamp.length && !$stamp.val()) $stamp.val('off');
+    }
+
     window.ROS2Suite = {
+        initOptions: initOptions,
         endpoint: endpoint,
         list: list,
         showType: showType,

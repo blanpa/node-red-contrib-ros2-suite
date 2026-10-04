@@ -1,6 +1,6 @@
 'use strict';
 
-const { statusSetter, HzMeter, formatHz, shortType, useConnection } = require('../lib/node-common');
+const { statusSetter, HzMeter, formatHz, shortType, useConnection, qosFromConfig, qosText } = require('../lib/node-common');
 const { sameType, similarNames } = require('../lib/type-registry');
 
 const DIAGNOSE_AFTER = 5000;
@@ -10,13 +10,14 @@ const RETRY_TYPE_EVERY = 5000;
 // topic: BEST_EFFORT + VOLATILE, or TRANSIENT_LOCAL + RELIABLE when every
 // publisher present at that moment is latched. Such a subscription never
 // receives VOLATILE or BEST_EFFORT publishers that join later.
-const QOS_EXPLANATION = (topic) =>
+const QOS_EXPLANATION = (topic, qosLabel) =>
     `no data on ${topic} for ${DIAGNOSE_AFTER / 1000} s although it is advertised. Likely causes: ` +
     '(1) the publisher is idle — check `ros2 topic hz ' + topic + '`; ' +
     '(2) QoS: rosbridge fixes its QoS when the topic is first subscribed through it (by any rosbridge client) — ' +
     'TRANSIENT_LOCAL + RELIABLE if all publishers present then were latched, which never receives VOLATILE or ' +
-    'BEST_EFFORT publishers that joined later. Compare with `ros2 topic info -v ' + topic + '`; redeploying helps ' +
-    'only if no other rosbridge client keeps the topic subscribed; ' +
+    'BEST_EFFORT publishers that joined later. Compare with `ros2 topic info -v ' + topic + '` and set the QoS ' +
+    'on this node to match the publisher (this node asked for: ' + qosLabel + '); a changed QoS takes effect ' +
+    'only once no rosbridge client keeps the topic subscribed; ' +
     '(3) discovery works but data does not arrive: DDS shared-memory transport between containers without a ' +
     'shared /dev/shm, firewalls, or large messages (images, point clouds) lost over Wi-Fi with BEST_EFFORT.';
 
@@ -30,6 +31,9 @@ module.exports = function (RED) {
         const configuredType = (config.rosType || '').trim();
         const throttle = Math.max(0, parseInt(config.throttle, 10) || 0);
         const queue = Math.max(0, parseInt(config.queue, 10) || 0);
+        const compression = config.compression === 'cbor' ? 'cbor' : 'none';
+        const buffers = !!config.buffers;
+        const qos = qosFromConfig(config);
 
         if (!conn) {
             setStatus('error', 'no connection configured');
@@ -43,6 +47,8 @@ module.exports = function (RED) {
         const hz = new HzMeter();
         let unsubscribe = null;
         let currentType = null;
+        let decodeBinary = null;
+        let warnedDecoder = false;
         let received = 0;
         let receivedAtArm = 0;
         let starting = false;
@@ -83,11 +89,28 @@ module.exports = function (RED) {
                     return;
                 }
 
-                currentType = configuredType || advertised;
+                const type = configuredType || advertised;
+                // CBOR delivers uint8[] as Buffers already; JSON needs the type definition
+                decodeBinary = null;
+                if (buffers && compression !== 'cbor') {
+                    try {
+                        decodeBinary = await conn.registry.binaryDecoder(type);
+                    } catch (err) {
+                        if (!warnedDecoder) {
+                            warnedDecoder = true;
+                            node.warn(`cannot load the definition of ${type} (${err.message}) — uint8[] fields stay base64 strings`);
+                        }
+                    }
+                    if (closed || unsubscribe || !conn.client.connected) return;
+                }
+
+                currentType = type;
                 unsubscribe = conn.client.subscribe(topic, onMessage, {
                     type: currentType,
                     throttle_rate: throttle,
-                    queue_length: queue
+                    queue_length: queue,
+                    compression,
+                    qos
                 });
                 setStatus('wait', `subscribed · waiting for data · ${shortType(currentType)}`);
                 armWatchdog();
@@ -135,7 +158,7 @@ module.exports = function (RED) {
                 setStatus('warn', 'no data — check QoS / publisher');
                 if (!warnedQos) {
                     warnedQos = true;
-                    node.warn(QOS_EXPLANATION(topic));
+                    node.warn(QOS_EXPLANATION(topic, qosText(qos)));
                 }
             }
             // keep the status current (e.g. a publisher appears later) until data arrives
@@ -148,7 +171,7 @@ module.exports = function (RED) {
             received++;
             hz.tick();
             node.send({
-                payload: message,
+                payload: decodeBinary ? decodeBinary(message) : message,
                 topic,
                 ros: { topic, type: currentType, receivedAt: Date.now() }
             });
