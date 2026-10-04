@@ -2,7 +2,9 @@ name: release
 
 # Publishes to npm when a version tag is pushed:
 #   npm version minor && git push --follow-tags
-# Needs the repository secret NPM_TOKEN (an npm automation token).
+# Authentication is npm trusted publishing (OIDC): no token is stored here.
+# On npmjs.com the package lists this repository and this workflow file
+# (release.yml) as its trusted publisher.
 
 on:
   push:
@@ -13,19 +15,20 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # npm provenance
+      id-token: write # OIDC token for npm trusted publishing
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           registry-url: https://registry.npmjs.org
+      # trusted publishing needs npm 11.5.1 or newer
+      - run: npm install -g npm@latest
       - name: Tag matches package.json
         run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
       - run: npm ci
       - run: npm run lint
       - run: npm test
-      - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # provenance is attached automatically with trusted publishing
+      - run: npm publish --access public
