@@ -1,6 +1,6 @@
 'use strict';
 
-const { statusSetter, pick, useConnection, makeStamper } = require('../lib/node-common');
+const { statusSetter, pick, useConnection, makeStamper, makeValidator } = require('../lib/node-common');
 const { fullType, similarNames, encodeBuffers } = require('../lib/type-registry');
 
 module.exports = function (RED) {
@@ -68,20 +68,7 @@ module.exports = function (RED) {
             return type;
         }
 
-        async function check(type, goal) {
-            if (validation === 'off') return;
-            let result;
-            try {
-                result = await conn.registry.validate(type, goal, 'goal');
-            } catch (_) {
-                return;
-            }
-            for (const w of result.warnings) node.warn(w);
-            if (!result.errors.length) return;
-            const text = `invalid goal for ${type}: ${result.errors.join('; ')}`;
-            if (validation === 'strict') throw Object.assign(new Error(text), { validation: result.errors });
-            node.warn(text);
-        }
+        const check = makeValidator(node, conn, validation);
 
         function cancel(msg, send, done) {
             const action = pick(msg.action, configAction, allowOverride);
@@ -124,7 +111,7 @@ module.exports = function (RED) {
                 const type = await resolveType(action, msg);
                 let goal = msg.payload === undefined || msg.payload === null || msg.payload === '' ? {} : encodeBuffers(msg.payload);
                 goal = await stamp(type, 'goal', goal);
-                await check(type, goal);
+                await check(type, goal, 'goal');
 
                 const base = RED.util.cloneMessage(msg);
                 let goalId = null;
@@ -202,6 +189,7 @@ module.exports = function (RED) {
                 finished();
             }
             goals.clear();
+            stamp.close();
             release();
             setStatus.clear();
             done();

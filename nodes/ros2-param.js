@@ -1,14 +1,10 @@
 'use strict';
 
 const { statusSetter, pick, useConnection } = require('../lib/node-common');
-const { similarNames } = require('../lib/type-registry');
+const { similarNames, isPlainObject } = require('../lib/type-registry');
 const params = require('../lib/params');
 
 const OPERATIONS = ['get', 'set', 'list', 'describe'];
-
-function isPlainObject(v) {
-    return v !== null && typeof v === 'object' && !Array.isArray(v) && !Buffer.isBuffer(v);
-}
 
 module.exports = function (RED) {
     function Ros2ParamNode(config) {
@@ -126,6 +122,8 @@ module.exports = function (RED) {
             const { names, single } = paramNames(msg);
             if (!names.length) throw new Error('no parameter — set it on the node or pass msg.param');
             const descriptors = await params.describeParameters(conn.client, rosNode, names, timeout);
+            const missing = names.filter((_, i) => !descriptors[i]);
+            if (missing.length) throw await unknownParameters(rosNode, missing);
             msg.payload = single ? descriptors[0] : descriptors;
             msg.ros = { node: rosNode, operation: 'describe', param: single ? names[0] : names };
             return `described ${names.join(', ')}`;

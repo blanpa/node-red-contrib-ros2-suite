@@ -100,6 +100,17 @@ describe('TfBuffer', function () {
         assert.ok(close(tf.lookup('odom', 'base_link').transform.translation.x, 5));
     });
 
+    it('starts over after a jump back in time', function () {
+        const tf = new TfBuffer();
+        tf.add([edge('map', 'odom', {})], true);
+        tf.add([edge('odom', 'base_link', { x: 1 }, undefined, 500), edge('odom', 'other', {}, undefined, 500)]);
+        // a simulator reset: stamps restart near zero
+        tf.add([edge('odom', 'base_link', { x: 2 }, undefined, 3)]);
+        assert.ok(close(tf.lookup('map', 'base_link').transform.translation.x, 2));
+        assert.throws(() => tf.lookup('map', 'other'), /not in the TF tree/); // stale dynamic frames are gone
+        assert.deepStrictEqual(tf.frames().map((f) => f.frame), ['base_link', 'map', 'odom']);
+    });
+
     it('explains failed lookups', function () {
         const tf = new TfBuffer();
         assert.throws(() => tf.lookup('map', 'tool'), /no transforms received yet/);
@@ -336,6 +347,32 @@ describe('nodes: QoS, stamps, TF, action server', function () {
         const frame = await mock.waitFor((f) => f.op === 'publish' && f.topic === '/arrays');
         assert.deepStrictEqual(frame.msg.header.stamp, { sec: 42, nanosec: 7 });
         assert.strictEqual(warns.length, 1);
+    });
+
+    it('stamping asks rosapi only once for a type it cannot load', async function () {
+        await load([
+            { id: 'pub', type: 'ros2-publish', connection: 'c1', topic: '/unknown_type', rosType: 'nope_msgs/msg/Nope', stamp: 'system', validation: 'off', wires: [['out']] },
+            { id: 'out', type: 'helper' }
+        ]);
+        const pub = helper.getNode('pub');
+        const warns = calls(pub, 'warn');
+        for (let i = 0; i < 3; i++) {
+            const out = nextInput(helper.getNode('out'));
+            pub.receive({ payload: { value: i } });
+            await out;
+        }
+        assert.strictEqual(mock.received.filter((f) => f.service === '/rosapi/message_details').length, 1);
+        assert.strictEqual(warns.filter((w) => /header stamps are not filled/.test(w)).length, 1);
+    });
+
+    it('unsubscribes from /clock when the last stamping node is gone', async function () {
+        await load([
+            { id: 'pub', type: 'ros2-publish', connection: 'c1', topic: '/arrays', stamp: 'clock', wires: [[]] }
+        ]);
+        const sub = await mock.waitFor((f) => f.op === 'subscribe' && f.topic === '/clock');
+        assert.strictEqual(sub.throttle_rate, 10);
+        await helper.getNode('pub').close();
+        await mock.waitFor((f) => f.op === 'unsubscribe' && f.topic === '/clock');
     });
 
     it('service and action stamp requests and goals', async function () {

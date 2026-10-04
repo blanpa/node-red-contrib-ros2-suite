@@ -83,6 +83,12 @@ describe('params', function () {
             ]);
             const [d] = await params.describeParameters(client, '/turtlesim', ['gain']);
             assert.strictEqual(d.typeName, 'double');
+            // one unknown name must not hide the known ones
+            const mixed = await params.describeParameters(client, '/turtlesim', ['nope', 'gain']);
+            assert.strictEqual(mixed[0], null);
+            assert.strictEqual(mixed[1].name, 'gain');
+            assert.deepStrictEqual(await params.getParameterTypes(client, '/turtlesim', ['gain', 'nope']), ['double', 'not_set']);
+            assert.deepStrictEqual(await params.describeParameters(client, '/turtlesim', ['nope']), [null]);
             const frame = await mock.waitFor((f) => f.service === '/turtlesim/get_parameters');
             assert.strictEqual(frame.type, 'rcl_interfaces/srv/GetParameters');
         });

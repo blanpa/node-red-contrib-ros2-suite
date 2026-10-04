@@ -170,9 +170,8 @@ module.exports = function (RED) {
         function onMessage(message) {
             received++;
             hz.tick();
-            if (decodeBinary) decodeBinary(message);
             node.send({
-                payload: message,
+                payload: decodeBinary ? decodeBinary(message) : message,
                 topic,
                 ros: { topic, type: currentType, receivedAt: Date.now() }
             });

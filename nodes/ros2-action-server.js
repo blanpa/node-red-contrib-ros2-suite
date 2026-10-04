@@ -1,6 +1,6 @@
 'use strict';
 
-const { statusSetter, shortType, useConnection } = require('../lib/node-common');
+const { statusSetter, useConnection, makeValidator } = require('../lib/node-common');
 const { fullType, encodeBuffers } = require('../lib/type-registry');
 
 const OUTCOMES = ['succeeded', 'canceled', 'aborted'];
@@ -35,20 +35,8 @@ module.exports = function (RED) {
             else setStatus(served ? 'ok' : 'idle', served ? `served ${served} · ${action}` : `serving ${action}`);
         }
 
-        async function check(value, kind) {
-            if (validation === 'off') return;
-            let result;
-            try {
-                result = await conn.registry.validate(type, value, kind);
-            } catch (_) {
-                return; // no definition available: let rosbridge decide
-            }
-            for (const w of result.warnings) node.warn(w);
-            if (!result.errors.length) return;
-            const text = `invalid ${kind} for ${shortType(type)}: ${result.errors.join('; ')}`;
-            if (validation === 'strict') throw Object.assign(new Error(text), { validation: result.errors });
-            node.warn(text);
-        }
+        const validate = makeValidator(node, conn, validation);
+        const check = (value, kind) => validate(type, value, kind);
 
         const meta = (goalId) => ({
             action,

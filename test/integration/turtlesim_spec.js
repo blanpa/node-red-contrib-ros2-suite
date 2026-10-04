@@ -258,6 +258,18 @@ describe(`turtlesim through rosbridge at ${URL}`, function () {
             assert.strictEqual(descriptor.typeName, 'integer');
         });
 
+        it('names only the unknown parameter of a mixed request', async function () {
+            await load(flow({ operation: 'get' }));
+            const par = helper.getNode('par');
+            const errors = calls(par, 'error');
+            par.receive({ param: ['background_r', 'no_such_parameter'] });
+            await until(() => errors.length > 0, 10000, 'error');
+            assert.match(String(errors[0]), /\/turtlesim has no parameter no_such_parameter$/);
+            par.receive({ operation: 'describe', param: 'no_such_parameter' });
+            await until(() => errors.length > 1, 10000, 'second error');
+            assert.match(String(errors[1]), /\/turtlesim has no parameter no_such_parameter$/);
+        });
+
         it('reports a value the ROS node rejects', async function () {
             await load(flow({ operation: 'set', param: 'background_r', paramType: 'string' }));
             const par = helper.getNode('par');
