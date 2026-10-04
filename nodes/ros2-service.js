@@ -1,6 +1,6 @@
 'use strict';
 
-const { statusSetter, shortType, pick, useConnection, makeStamper } = require('../lib/node-common');
+const { statusSetter, pick, useConnection, makeStamper, makeValidator } = require('../lib/node-common');
 const { fullType, similarNames, unsafeService, encodeBuffers } = require('../lib/type-registry');
 
 // Unanswered requests are kept until the timeout; with "no timeout" this caps them.
@@ -30,20 +30,7 @@ module.exports = function (RED) {
 
         const stamp = makeStamper(node, conn, config.stamp);
 
-        async function check(type, value, kind) {
-            if (validation === 'off' || !type) return;
-            let result;
-            try {
-                result = await conn.registry.validate(type, value, kind);
-            } catch (err) {
-                return; // no definition available: let rosbridge decide
-            }
-            for (const w of result.warnings) node.warn(w);
-            if (!result.errors.length) return;
-            const text = `invalid ${kind} for ${shortType(type)}: ${result.errors.join('; ')}`;
-            if (validation === 'strict') throw Object.assign(new Error(text), { validation: result.errors });
-            node.warn(text);
-        }
+        const check = makeValidator(node, conn, validation);
 
         if (mode === 'client') setupClient();
         else setupServer();
@@ -110,6 +97,7 @@ module.exports = function (RED) {
                 if (state === 'connected') showIdle();
             });
             node.on('close', (done) => {
+                stamp.close();
                 release();
                 setStatus.clear();
                 done();
@@ -238,6 +226,7 @@ module.exports = function (RED) {
                     respond({}, false);
                 }
                 open.clear();
+                stamp.close();
                 if (server) server.unadvertise();
                 release();
                 setStatus.clear();

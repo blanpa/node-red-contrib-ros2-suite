@@ -128,8 +128,11 @@ describe('RosbridgeClient additions', function () {
     it('builds a decoder for the binary fields of a type', async function () {
         const registry = new TypeRegistry(client);
         const decode = await registry.binaryDecoder('test_msgs/msg/Arrays');
-        const msg = decode({ header: { frame_id: 'a' }, data: 'AQID', names: ['AQID'], points: [] });
+        const input = { header: { frame_id: 'a' }, data: 'AQID', names: ['AQID'], points: [] };
+        const msg = decode(input);
         assert.deepStrictEqual(msg.data, Buffer.from([1, 2, 3]));
+        assert.strictEqual(input.data, 'AQID'); // other subscribers share the input
+        assert.strictEqual(msg.header, input.header);
         assert.deepStrictEqual(msg.names, ['AQID']); // strings stay strings
         assert.strictEqual(await registry.binaryDecoder('geometry_msgs/msg/Twist'), null);
     });
@@ -205,6 +208,35 @@ describe('node features', function () {
             const got = nextInput(helper.getNode('out'));
             mock.publish('/arrays', { data: Buffer.from([9, 8]), fixed: [1, 2, 3.5] });
             assert.deepStrictEqual((await got).payload, { data: Buffer.from([9, 8]), fixed: [1, 2, 3.5] });
+        });
+
+        it('two subscribe nodes on one topic each get their own representation', async function () {
+            await load([
+                conn(),
+                { id: 'a', type: 'ros2-subscribe', connection: 'c1', topic: '/arrays', buffers: true, wires: [['oa']] },
+                { id: 'b', type: 'ros2-subscribe', connection: 'c1', topic: '/arrays', wires: [['ob']] },
+                { id: 'oa', type: 'helper' },
+                { id: 'ob', type: 'helper' }
+            ]);
+            await until(() => mock.subscriberCount('/arrays') === 2, 2000, 'both subscriptions');
+            const a = nextInput(helper.getNode('oa'));
+            const b = nextInput(helper.getNode('ob'));
+            mock.publish('/arrays', { data: 'AQID', header: { frame_id: 'x' } });
+            assert.deepStrictEqual((await a).payload.data, Buffer.from([1, 2, 3]));
+            assert.strictEqual((await b).payload.data, 'AQID');
+        });
+
+        it('publish refuses a Buffer as the whole payload', async function () {
+            await load([
+                conn(),
+                { id: 'pub', type: 'ros2-publish', connection: 'c1', topic: '/chatter', wires: [[]] }
+            ]);
+            const pub = helper.getNode('pub');
+            const errors = calls(pub, 'error');
+            pub.receive({ payload: Buffer.from('hello') });
+            await until(() => errors.length > 0, 2000, 'error');
+            assert.match(String(errors[0]), /msg.payload is a Buffer, but std_msgs\/msg\/String needs an object/);
+            assert.ok(!mock.received.some((f) => f.op === 'publish'));
         });
 
         it('publish sends Buffers as base64 and leaves msg.payload alone', async function () {
@@ -294,6 +326,28 @@ describe('node features', function () {
             await until(() => errors.length > 0, 2000, 'error');
             assert.match(String(errors[0]), /background_r: expected integer, got string "red"/);
             assert.ok(!mock.received.some((f) => f.service === '/turtlesim/set_parameters'));
+        });
+
+        it('names only the unknown parameters of a mixed request', async function () {
+            await load(paramFlow({ operation: 'get' }));
+            const par = helper.getNode('par');
+            const errors = calls(par, 'error');
+            par.receive({ param: ['background_r', 'nope'] });
+            await until(() => errors.length > 0, 2000, 'error');
+            assert.match(String(errors[0]), /\/turtlesim has no parameter nope$/);
+            par.receive({ operation: 'describe', param: 'nope' });
+            await until(() => errors.length > 1, 2000, 'second error');
+            assert.match(String(errors[1]), /\/turtlesim has no parameter nope$/);
+        });
+
+        it('sets a double next to a parameter that is not declared yet', async function () {
+            await load(paramFlow({ operation: 'set' }));
+            const out = nextInput(helper.getNode('out'));
+            helper.getNode('par').receive({ payload: { gain: 3, brand_new: 1 } });
+            const msg = await out;
+            assert.deepStrictEqual(msg.ros.types, { gain: 'double', brand_new: 'integer' });
+            mock.parameters.set('gain', { type: 3, double_value: 0.5 });
+            mock.parameters.delete('brand_new');
         });
 
         it('lists and describes', async function () {

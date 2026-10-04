@@ -137,13 +137,18 @@ class MockRosbridge {
             ['/failing_service', { type: 'std_srvs/srv/Trigger', handler: () => { throw new Error('boom'); } }],
             ['/turtlesim/get_parameters', {
                 type: 'rcl_interfaces/srv/GetParameters',
-                handler: ({ names }) => ({ values: names.map((n) => this.parameters.get(n) || { type: 0 }) })
+                // like rclcpp: one undeclared name empties the whole answer
+                handler: ({ names }) => ({
+                    values: names.every((n) => this.parameters.has(n)) ? names.map((n) => this.parameters.get(n)) : []
+                })
             }],
             ['/turtlesim/get_parameter_types', {
                 type: 'rcl_interfaces/srv/GetParameterTypes',
                 // uint8[] goes over the wire as base64, like in the real rosbridge
                 handler: ({ names }) => ({
-                    types: Buffer.from(names.map((n) => (this.parameters.get(n) || { type: 0 }).type)).toString('base64')
+                    types: names.every((n) => this.parameters.has(n))
+                        ? Buffer.from(names.map((n) => this.parameters.get(n).type)).toString('base64')
+                        : ''
                 })
             }],
             ['/turtlesim/set_parameters', {
@@ -164,7 +169,9 @@ class MockRosbridge {
             ['/turtlesim/describe_parameters', {
                 type: 'rcl_interfaces/srv/DescribeParameters',
                 handler: ({ names }) => ({
-                    descriptors: names.map((name) => ({ name, type: (this.parameters.get(name) || { type: 0 }).type, description: `about ${name}`, read_only: false }))
+                    descriptors: names.every((n) => this.parameters.has(n))
+                        ? names.map((name) => ({ name, type: this.parameters.get(name).type, description: `about ${name}`, read_only: false }))
+                        : []
                 })
             }]
         ]);

@@ -68,6 +68,8 @@ module.exports = function (RED) {
         node.users = new Set();
 
         let lastLogged = null;
+        let clockTime = null; // latest /clock message
+        let tf = null;        // transform tree, while tf nodes exist
         node.client.on('state', (state, err) => {
             if (state === 'connected') {
                 node.log(`connected to ${node.url}`);
@@ -79,6 +81,12 @@ module.exports = function (RED) {
             }
         });
         node.client.on('warning', (text) => node.warn(text));
+        node.client.on('state', (state) => {
+            if (state === 'connected') return;
+            // what was known may be outdated by the time the connection is back
+            clockTime = null;
+            if (tf) tf.clear();
+        });
 
         // Connect lazily: an unused config node should not hold a socket open.
         let idleTimer = null;
@@ -109,24 +117,33 @@ module.exports = function (RED) {
         };
 
         // Current time as {sec, nanosec, source}: ROS time from /clock (simulation)
-        // once a clock message has arrived, the system time otherwise.
-        let clockSubscribed = false;
-        let clockTime = null;
-        node.rosTime = (source) => {
-            if (source === 'clock') {
-                if (!clockSubscribed) {
-                    clockSubscribed = true;
-                    node.client.subscribe('/clock', (m) => { clockTime = m && m.clock; }, { type: 'rosgraph_msgs/msg/Clock' });
-                }
-                if (clockTime) return { sec: clockTime.sec || 0, nanosec: clockTime.nanosec || 0, source: 'clock' };
+        // once a clock message has arrived, the system time otherwise. /clock is
+        // subscribed while nodes that stamp with it exist.
+        let clockUsers = 0;
+        let clockUnsubscribe = null;
+        node.clockAcquire = () => {
+            if (clockUsers++ === 0) {
+                // simulators publish /clock at up to 1 kHz; 100 Hz is plenty for stamps
+                clockUnsubscribe = node.client.subscribe('/clock', (m) => { clockTime = m && m.clock; },
+                    { type: 'rosgraph_msgs/msg/Clock', throttle_rate: 10 });
             }
-            const ms = performance.timeOrigin + performance.now();
+        };
+        node.clockRelease = () => {
+            if (clockUsers === 0 || --clockUsers > 0) return;
+            clockUnsubscribe();
+            clockUnsubscribe = null;
+            clockTime = null;
+        };
+        node.rosTime = (source) => {
+            if (source === 'clock' && clockTime) {
+                return { sec: clockTime.sec || 0, nanosec: clockTime.nanosec || 0, source: 'clock' };
+            }
+            const ms = Date.now(); // follows steps of the system clock (NTP), unlike performance.now()
             const sec = Math.floor(ms / 1000);
-            return { sec, nanosec: Math.round((ms - sec * 1000) * 1e6), source: 'system' };
+            return { sec, nanosec: (ms - sec * 1000) * 1e6, source: 'system' };
         };
 
         // One transform tree per connection, fed while tf nodes exist.
-        let tf = null;
         let tfUsers = 0;
         let tfSubscriptions = [];
         node.tfAcquire = () => {

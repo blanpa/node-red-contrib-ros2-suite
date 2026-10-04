@@ -72,7 +72,10 @@ module.exports = function (RED) {
         }
 
         async function prepare(type, payload) {
-            payload = encodeBuffers(payload); // Buffers travel as base64
+            if (Buffer.isBuffer(payload) || payload instanceof Uint8Array) {
+                throw new Error(`msg.payload is a Buffer, but ${type} needs an object — put the Buffer into its uint8[] field, e.g. {data: buffer}`);
+            }
+            payload = encodeBuffers(payload); // Buffers inside the message travel as base64
             payload = await stamp(type, 'msg', payload);
             // std_msgs-style wrappers: publish "hello" to std_msgs/String as {data: "hello"}
             const primitive = payload === null || ['string', 'number', 'boolean'].includes(typeof payload);
@@ -146,6 +149,7 @@ module.exports = function (RED) {
         node.on('close', (done) => {
             for (const { handle } of handles.values()) handle.unadvertise();
             handles.clear();
+            stamp.close();
             release();
             setStatus.clear();
             done();

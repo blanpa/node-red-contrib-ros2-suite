@@ -91,6 +91,9 @@ RED.nodes.registerType('ros2-tf', {
        node exists and keeps the latest transform of every frame. A lookup combines these latest
        transforms; it does not interpolate to a point in time. Trigger the node with an inject node to
        poll, e.g. every 100 ms.</p>
+    <p>The transform tree shares the connection's <code>/tf</code> and <code>/tf_static</code>
+       subscriptions with subscribe nodes on those topics: they are received CBOR-encoded, and
+       <code>/tf_static</code> with the QoS static transforms need (reliable, transient local).</p>
     <p>Errors go to Catch nodes: an unknown frame (with similar names as suggestions), frames that are
        not connected, and a transform older than <i>Max age</i>.</p>
 </script>
