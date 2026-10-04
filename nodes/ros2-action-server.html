@@ -1,0 +1,113 @@
+<script type="text/javascript">
+RED.nodes.registerType('ros2-action-server', {
+    category: 'ROS 2',
+    color: '#4b8bbe',
+    defaults: {
+        name: { value: '' },
+        connection: { value: '', type: 'ros2-connection' },
+        action: { value: '', required: true },
+        rosType: { value: '', required: true },
+        validation: { value: 'warn' }
+    },
+    inputs: 1,
+    outputs: 2,
+    icon: 'font-awesome/fa-cogs',
+    paletteLabel: 'action server',
+    label: function () {
+        return this.name || (this.action ? '⇐ ' + this.action : 'ros2 action server');
+    },
+    labelStyle: function () {
+        return this.name ? 'node_label_italic' : '';
+    },
+    inputLabels: ['feedback / result (msg with _ros2)'],
+    outputLabels: ['goal', 'cancel request'],
+    oneditprepare: function () {
+        var $type = $('#node-input-rosType');
+        var $out = $('#ros2-action-server-template');
+        var type = function () { return ($type.val() || '').trim(); };
+        ROS2Suite.attachTemplateButton($('#ros2-action-server-feedback-btn'), $out, ROS2Suite.connId, type, 'feedback');
+        ROS2Suite.attachTemplateButton($('#ros2-action-server-result-btn'), $out, ROS2Suite.connId, type, 'result');
+    }
+});
+</script>
+
+<script type="text/html" data-template-name="ros2-action-server">
+    <div class="form-row">
+        <label for="node-input-connection"><i class="fa fa-plug"></i> Connection</label>
+        <input type="text" id="node-input-connection">
+    </div>
+    <div class="form-row">
+        <label for="node-input-action"><i class="fa fa-cogs"></i> Action</label>
+        <input type="text" id="node-input-action" placeholder="/nodered/fibonacci">
+    </div>
+    <div class="form-row">
+        <label for="node-input-rosType"><i class="fa fa-cube"></i> Type</label>
+        <input type="text" id="node-input-rosType" placeholder="example_interfaces/action/Fibonacci">
+    </div>
+    <div class="form-row">
+        <label><i class="fa fa-file-code-o"></i> Templates</label>
+        <button id="ros2-action-server-feedback-btn" class="red-ui-button" title="show and copy an example feedback message">feedback</button>
+        <button id="ros2-action-server-result-btn" class="red-ui-button" title="show and copy an example result">result</button>
+        <pre id="ros2-action-server-template" class="ros2-template" style="display: none;"></pre>
+    </div>
+    <div class="form-row">
+        <label for="node-input-validation"><i class="fa fa-check-square-o"></i> Validate</label>
+        <select id="node-input-validation" style="width: 70%">
+            <option value="strict">strict — invalid feedback fails, an invalid result aborts the goal</option>
+            <option value="warn">warn — log problems, continue</option>
+            <option value="off">off — no checks</option>
+        </select>
+    </div>
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name">
+    </div>
+</script>
+
+<script type="text/html" data-help-name="ros2-action-server">
+    <p>Provides a ROS 2 action from a flow: ROS nodes send goals, the flow answers with feedback
+       and a result.</p>
+    <h3>Outputs</h3>
+    <ol class="node-ports">
+        <li>goal
+            <dl class="message-properties">
+                <dt>payload <span class="property-type">object</span></dt>
+                <dd>the goal message.</dd>
+                <dt>ros <span class="property-type">object</span></dt>
+                <dd><code>{action, type, goalId}</code></dd>
+                <dt>_ros2 <span class="property-type">object</span></dt>
+                <dd><code>{replyTo, goalId}</code> — keep it on the message, it routes feedback and
+                    the result.</dd>
+            </dl>
+        </li>
+        <li>cancel request
+            <dl class="message-properties">
+                <dt>payload <span class="property-type">object</span></dt>
+                <dd><code>{goalId}</code> — a client asked to cancel this goal. Stop the work and send
+                    a result with <code>msg.status = "canceled"</code> (it carries <code>_ros2</code>
+                    already).</dd>
+            </dl>
+        </li>
+    </ol>
+    <h3>Inputs</h3>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">object</span></dt>
+        <dd>the feedback message when <code>msg.feedback</code> is <code>true</code>, otherwise the
+            result, which ends the goal.</dd>
+        <dt class="optional">feedback <span class="property-type">boolean</span></dt>
+        <dd><code>true</code>: publish <code>payload</code> as feedback; the goal keeps running.</dd>
+        <dt class="optional">status <span class="property-type">string</span></dt>
+        <dd>how the goal ends: <code>succeeded</code> (default), <code>canceled</code> or
+            <code>aborted</code>.</dd>
+        <dt class="optional">error <span class="property-type">string</span></dt>
+        <dd>aborts the goal; the text is logged here.</dd>
+    </dl>
+    <h3>Details</h3>
+    <p>Wire the flow <b>back into this same node</b>, with <code>msg._ros2</code> kept on the message.
+       Every goal is accepted. An aborted goal reaches the client with an empty result, because
+       rosbridge does not pass the result of an abort on. Goals that are running when the connection to
+       rosbridge drops, or when this node is redeployed, are aborted. The action is advertised again
+       after a reconnect.</p>
+    <p>On ROS 2 Humble start rosbridge with <code>send_action_goals_in_new_thread:=true</code>,
+       like for the action client.</p>
+</script>

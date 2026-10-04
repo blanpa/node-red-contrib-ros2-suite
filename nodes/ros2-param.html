@@ -1,0 +1,137 @@
+<script type="text/javascript">
+RED.nodes.registerType('ros2-param', {
+    category: 'ROS 2',
+    color: '#4b8bbe',
+    defaults: {
+        name: { value: '' },
+        connection: { value: '', type: 'ros2-connection' },
+        operation: { value: 'get' },
+        node: { value: '' },
+        param: { value: '' },
+        paramType: { value: '' },
+        allowOverride: { value: false }
+    },
+    inputs: 1,
+    outputs: 1,
+    icon: 'font-awesome/fa-sliders',
+    paletteLabel: 'param',
+    label: function () {
+        if (this.name) return this.name;
+        if (!this.node) return 'ros2 param';
+        return this.operation + ' ' + this.node + (this.param && this.operation !== 'list' ? ' ' + this.param : '');
+    },
+    labelStyle: function () {
+        return this.name ? 'node_label_italic' : '';
+    },
+    oneditprepare: function () {
+        var $node = $('#node-input-node');
+        var $nodeHint = $('#ros2-param-node-hint');
+        var $paramHint = $('#ros2-param-hint');
+        var $operation = $('#node-input-operation');
+        ROS2Suite.attachAutocomplete($node, 'nodes', ROS2Suite.connId, function (entry, name) {
+            if (entry || !name) ROS2Suite.showType($nodeHint, '', 'info');
+            else ROS2Suite.showType($nodeHint, 'node ' + name + ' is not running right now', 'warn');
+        }, $nodeHint);
+        ROS2Suite.attachAutocomplete($('#node-input-param'), 'params', ROS2Suite.connId, function (entry, name) {
+            if (entry && entry.type) ROS2Suite.showType($paramHint, 'type: ' + entry.type, 'ok');
+            else if (name && ($node.val() || '').trim()) ROS2Suite.showType($paramHint, name + ' is not declared on the node right now', 'warn');
+            else ROS2Suite.showType($paramHint, '', 'info');
+        }, $paramHint, function () {
+            var name = ($node.val() || '').trim();
+            return name ? { node: name } : null;
+        });
+        $operation.on('change', function () {
+            var op = $operation.val();
+            $('.ros2-param-name').toggle(op !== 'list');
+            $('.ros2-param-set').toggle(op === 'set');
+        }).trigger('change');
+    }
+});
+</script>
+
+<script type="text/html" data-template-name="ros2-param">
+    <div class="form-row">
+        <label for="node-input-connection"><i class="fa fa-plug"></i> Connection</label>
+        <input type="text" id="node-input-connection">
+    </div>
+    <div class="form-row">
+        <label for="node-input-operation"><i class="fa fa-wrench"></i> Operation</label>
+        <select id="node-input-operation" style="width: 70%">
+            <option value="get">get — read parameters</option>
+            <option value="set">set — change parameters</option>
+            <option value="list">list — all parameters of the node</option>
+            <option value="describe">describe — type, description, ranges</option>
+        </select>
+    </div>
+    <div class="form-row">
+        <label for="node-input-node"><i class="fa fa-circle-o"></i> ROS node</label>
+        <input type="text" id="node-input-node" placeholder="/turtlesim" autocomplete="off">
+        <span id="ros2-param-node-hint" class="ros2-hint"></span>
+    </div>
+    <div class="form-row ros2-param-name">
+        <label for="node-input-param"><i class="fa fa-sliders"></i> Parameter</label>
+        <input type="text" id="node-input-param" placeholder="background_r (or msg.param)" autocomplete="off">
+        <span id="ros2-param-hint" class="ros2-hint"></span>
+    </div>
+    <div class="form-row ros2-param-set">
+        <label for="node-input-paramType"><i class="fa fa-cube"></i> Type</label>
+        <select id="node-input-paramType" style="width: 70%">
+            <option value="">auto — the parameter's current type</option>
+            <option value="bool">bool</option>
+            <option value="integer">integer</option>
+            <option value="double">double</option>
+            <option value="string">string</option>
+            <option value="byte_array">byte_array</option>
+            <option value="bool_array">bool_array</option>
+            <option value="integer_array">integer_array</option>
+            <option value="double_array">double_array</option>
+            <option value="string_array">string_array</option>
+        </select>
+    </div>
+    <div class="form-row">
+        <input type="checkbox" id="node-input-allowOverride" style="display: inline-block; width: auto; vertical-align: top; margin-left: 105px;">
+        <label for="node-input-allowOverride" style="width: auto;">msg.node / msg.param override the configured names</label>
+    </div>
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name">
+    </div>
+</script>
+
+<script type="text/html" data-help-name="ros2-param">
+    <p>Reads, changes, lists and describes the parameters of a ROS 2 node, through the parameter
+       services every ROS 2 node offers (<code>&lt;node&gt;/get_parameters</code>, …).</p>
+    <h3>Inputs</h3>
+    <dl class="message-properties">
+        <dt class="optional">payload</dt>
+        <dd><b>set</b>: the new value — boolean, number, string, or an array of one of those. Without a
+            parameter name, an object <code>{name: value, …}</code> sets several parameters at once.</dd>
+        <dt class="optional">param <span class="property-type">string | array</span></dt>
+        <dd>parameter name, or several names for <b>get</b> and <b>describe</b>. Used when no parameter is
+            configured, or when overriding is enabled.</dd>
+        <dt class="optional">node <span class="property-type">string</span></dt>
+        <dd>ROS node name, e.g. <code>/turtlesim</code>. Used when no node is configured, or when
+            overriding is enabled.</dd>
+        <dt class="optional">operation <span class="property-type">string</span></dt>
+        <dd><code>get</code>, <code>set</code>, <code>list</code> or <code>describe</code> — overrides
+            the configured operation.</dd>
+        <dt class="optional">paramType <span class="property-type">string</span></dt>
+        <dd><b>set</b>: force the type, e.g. <code>double</code>.</dd>
+    </dl>
+    <h3>Outputs</h3>
+    <dl class="message-properties">
+        <dt>payload</dt>
+        <dd><b>get</b>: the value, or <code>{name: value}</code> for several names.
+            <b>set</b>: unchanged. <b>list</b>: <code>[{name, type}]</code>.
+            <b>describe</b>: the <code>rcl_interfaces/msg/ParameterDescriptor</code> (an array for several
+            names) with <code>typeName</code> added.</dd>
+        <dt>ros <span class="property-type">object</span></dt>
+        <dd><code>{node, operation, param, type}</code></dd>
+    </dl>
+    <h3>Details</h3>
+    <p>JavaScript cannot tell <code>1.0</code> from <code>1</code>. With <i>Type: auto</i> the node asks
+       for the parameter's current type first, so a whole number sent to a <code>double</code> parameter
+       is sent as double. For a parameter that is not declared yet, whole numbers become integers.</p>
+    <p>Errors go to Catch nodes: an unknown parameter or a ROS node that is not running (both with
+       similar names as suggestions), and a value the ROS node rejects, with its reason.</p>
+</script>

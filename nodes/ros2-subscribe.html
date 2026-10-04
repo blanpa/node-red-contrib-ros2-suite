@@ -8,7 +8,13 @@ RED.nodes.registerType('ros2-subscribe', {
         topic: { value: '', required: true },
         rosType: { value: '' },
         throttle: { value: 0, validate: RED.validators.number(true) },
-        queue: { value: 1, validate: RED.validators.number(true) }
+        queue: { value: 1, validate: RED.validators.number(true) },
+        qos: { value: 'auto' },
+        qosReliability: { value: 'reliable' },
+        qosDurability: { value: 'volatile' },
+        qosDepth: { value: 10, validate: RED.validators.number(true) },
+        compression: { value: 'none' },
+        buffers: { value: false }
     },
     inputs: 0,
     outputs: 1,
@@ -26,6 +32,12 @@ RED.nodes.registerType('ros2-subscribe', {
         var $hint = $('#ros2-subscribe-hint');
         ROS2Suite.attachAutocomplete($('#node-input-topic'), 'topics', ROS2Suite.connId,
             ROS2Suite.typeDetector($type, $hint, 'topic'), $hint);
+        ROS2Suite.initOptions();
+        // nodes saved before these options existed
+        if (!$('#node-input-compression').val()) $('#node-input-compression').val('none');
+        $('#node-input-compression').on('change', function () {
+            $('.ros2-subscribe-json-only').toggle($(this).val() !== 'cbor');
+        }).trigger('change');
     }
 });
 </script>
@@ -53,6 +65,39 @@ RED.nodes.registerType('ros2-subscribe', {
         <input type="text" id="node-input-queue" style="width: 70px"> messages kept while throttling
     </div>
     <div class="form-row">
+        <label for="node-input-qos"><i class="fa fa-sliders"></i> QoS</label>
+        <select id="node-input-qos" style="width: 70%">
+            <option value="auto">auto — rosbridge matches the publishers it sees</option>
+            <option value="default">default — reliable, volatile, depth 10</option>
+            <option value="sensor">sensor data — best effort, volatile, depth 5</option>
+            <option value="latched">latched — reliable, transient local, depth 1</option>
+            <option value="custom">custom</option>
+        </select>
+    </div>
+    <div class="form-row ros2-qos-custom">
+        <label for="node-input-qosReliability"></label>
+        <select id="node-input-qosReliability" style="width: 26%">
+            <option value="reliable">reliable</option>
+            <option value="best_effort">best effort</option>
+        </select>
+        <select id="node-input-qosDurability" style="width: 28%">
+            <option value="volatile">volatile</option>
+            <option value="transient_local">transient local</option>
+        </select>
+        depth <input type="text" id="node-input-qosDepth" style="width: 50px">
+    </div>
+    <div class="form-row">
+        <label for="node-input-compression"><i class="fa fa-compress"></i> Encoding</label>
+        <select id="node-input-compression" style="width: 70%">
+            <option value="none">JSON</option>
+            <option value="cbor">CBOR — compact binary, for images, scans, point clouds</option>
+        </select>
+    </div>
+    <div class="form-row ros2-subscribe-json-only">
+        <input type="checkbox" id="node-input-buffers" style="display: inline-block; width: auto; vertical-align: top; margin-left: 105px;">
+        <label for="node-input-buffers" style="width: auto;">deliver uint8[] fields as Buffer instead of base64</label>
+    </div>
+    <div class="form-row">
         <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
         <input type="text" id="node-input-name">
     </div>
@@ -78,8 +123,25 @@ RED.nodes.registerType('ros2-subscribe', {
             type, the node reports the mismatch instead of subscribing.</dd>
         <dt>Throttle / Queue</dt>
         <dd>passed to rosbridge (<code>throttle_rate</code>, <code>queue_length</code>) — rosbridge drops
-            messages before they cross the network, which matters for camera or laser topics.</dd>
+            messages before they cross the network, which matters for camera or laser topics. When several
+            subscribe nodes share a topic, rosbridge sends at the fastest rate any of them asked for; the
+            slower ones are throttled inside Node-RED.</dd>
+        <dt>QoS</dt>
+        <dd><b>auto</b> leaves the choice to rosbridge. The presets and <b>custom</b> set reliability,
+            durability and depth explicitly — match them to the other side (<code>ros2 topic info -v</code>).
+            rosbridge creates one ROS subscription per topic for all its clients, so the QoS of the first one
+            wins until nobody uses the topic through rosbridge any more. Needs a rosbridge that understands
+            the <code>qos</code> field (current releases for Humble and later); older ones ignore it.</dd>
+        <dt>Encoding</dt>
+        <dd><b>JSON</b> is the default; <code>uint8[]</code> fields (image data, …) arrive as base64
+            strings, or as <code>Buffer</code> when the checkbox is ticked. <b>CBOR</b> makes rosbridge send
+            compact binary frames: <code>uint8[]</code> fields arrive as <code>Buffer</code>, numeric arrays
+            are not spelled out as text, and <code>NaN</code>/<code>Infinity</code> survive. Use it for
+            images, laser scans and point clouds. The encoding applies to the topic on this connection: if
+            one subscribe node asks for CBOR, all subscribe nodes of that topic receive Buffers.</dd>
     </dl>
+    <p>64-bit integers (<code>int64</code>, <code>uint64</code>) become JavaScript numbers, which are exact
+       only up to 2<sup>53</sup>.</p>
     <h3>Status</h3>
     <p>Shows the receive rate (e.g. <code>9.8 Hz · turtlesim/Pose</code>).</p>
     <h3>Diagnosis</h3>
@@ -94,6 +156,7 @@ RED.nodes.registerType('ros2-subscribe', {
             it, and if all publishers were latched (<code>TRANSIENT_LOCAL</code>) then, it never receives
             <code>VOLATILE</code> or <code>BEST_EFFORT</code> publishers that join later (e.g. <code>/map</code>);
             or a data path that fails although discovery works (shared memory between containers, firewall,
-            large messages over Wi-Fi). The debug sidebar gets the details once.</li>
+            large messages over Wi-Fi). The debug sidebar gets the details once. If the publisher's QoS is
+            the cause, set <i>QoS</i> on this node to match it.</li>
     </ul>
 </script>

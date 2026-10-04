@@ -45,7 +45,9 @@
             [
                 "dbg_pose"
             ]
-        ]
+        ],
+        "compression": "none",
+        "buffers": false
     },
     {
         "id": "dbg_pose",
@@ -591,6 +593,165 @@
         "statusType": "auto",
         "x": 590,
         "y": 800,
+        "wires": []
+    },
+    {
+        "id": "c_param",
+        "type": "comment",
+        "z": "tab_ros2_demo",
+        "name": "Parameters: read and change the background colour",
+        "info": "turtlesim repaints with the new colour on the next `/clear` call or when the turtle is reset.",
+        "x": 230,
+        "y": 880,
+        "wires": []
+    },
+    {
+        "id": "inj_plist",
+        "type": "inject",
+        "z": "tab_ros2_demo",
+        "name": "list",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 150,
+        "y": 920,
+        "wires": [
+            [
+                "par_list"
+            ]
+        ]
+    },
+    {
+        "id": "inj_pget",
+        "type": "inject",
+        "z": "tab_ros2_demo",
+        "name": "get",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 150,
+        "y": 960,
+        "wires": [
+            [
+                "par_get"
+            ]
+        ]
+    },
+    {
+        "id": "inj_pset",
+        "type": "inject",
+        "z": "tab_ros2_demo",
+        "name": "set 255",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "255",
+        "payloadType": "num",
+        "x": 150,
+        "y": 1000,
+        "wires": [
+            [
+                "par_set"
+            ]
+        ]
+    },
+    {
+        "id": "par_list",
+        "type": "ros2-param",
+        "z": "tab_ros2_demo",
+        "name": "",
+        "connection": "conn_turtlesim",
+        "operation": "list",
+        "node": "/turtlesim",
+        "param": "",
+        "paramType": "",
+        "allowOverride": false,
+        "x": 420,
+        "y": 920,
+        "wires": [
+            [
+                "dbg_param"
+            ]
+        ]
+    },
+    {
+        "id": "par_get",
+        "type": "ros2-param",
+        "z": "tab_ros2_demo",
+        "name": "",
+        "connection": "conn_turtlesim",
+        "operation": "get",
+        "node": "/turtlesim",
+        "param": "background_r",
+        "paramType": "",
+        "allowOverride": false,
+        "x": 420,
+        "y": 960,
+        "wires": [
+            [
+                "dbg_param"
+            ]
+        ]
+    },
+    {
+        "id": "par_set",
+        "type": "ros2-param",
+        "z": "tab_ros2_demo",
+        "name": "",
+        "connection": "conn_turtlesim",
+        "operation": "set",
+        "node": "/turtlesim",
+        "param": "background_r",
+        "paramType": "",
+        "allowOverride": false,
+        "x": 420,
+        "y": 1000,
+        "wires": [
+            [
+                "dbg_param"
+            ]
+        ]
+    },
+    {
+        "id": "dbg_param",
+        "type": "debug",
+        "z": "tab_ros2_demo",
+        "name": "parameters",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 700,
+        "y": 960,
         "wires": []
     }
 ]

@@ -9,6 +9,11 @@ RED.nodes.registerType('ros2-publish', {
         rosType: { value: '' },
         validation: { value: 'strict' },
         latch: { value: false },
+        stamp: { value: 'off' },
+        qos: { value: 'auto' },
+        qosReliability: { value: 'reliable' },
+        qosDurability: { value: 'volatile' },
+        qosDepth: { value: 10, validate: RED.validators.number(true) },
         allowOverride: { value: false }
     },
     inputs: 1,
@@ -29,6 +34,7 @@ RED.nodes.registerType('ros2-publish', {
         var $hint = $('#ros2-publish-hint');
         ROS2Suite.attachAutocomplete($('#node-input-topic'), 'topics', ROS2Suite.connId,
             ROS2Suite.typeDetector($type, $hint, 'topic'), $hint);
+        ROS2Suite.initOptions();
         ROS2Suite.attachTemplateButton($('#ros2-publish-template-btn'), $('#ros2-publish-template'),
             ROS2Suite.connId, function () { return ROS2Suite.typeOf($type); }, 'msg');
     }
@@ -52,6 +58,36 @@ RED.nodes.registerType('ros2-publish', {
             <i class="fa fa-file-code-o"></i> template
         </button>
         <pre id="ros2-publish-template" class="ros2-template" style="display: none;"></pre>
+    </div>
+    <div class="form-row">
+        <label for="node-input-stamp"><i class="fa fa-clock-o"></i> Stamp</label>
+        <select id="node-input-stamp" style="width: 70%">
+            <option value="off">off — headers are sent as given</option>
+            <option value="system">fill empty header.stamp with the system time</option>
+            <option value="clock">fill empty header.stamp with ROS time from /clock (simulation)</option>
+        </select>
+    </div>
+    <div class="form-row">
+        <label for="node-input-qos"><i class="fa fa-sliders"></i> QoS</label>
+        <select id="node-input-qos" style="width: 70%">
+            <option value="auto">auto — rosbridge default, or latched when ticked below</option>
+            <option value="default">default — reliable, volatile, depth 10</option>
+            <option value="sensor">sensor data — best effort, volatile, depth 5</option>
+            <option value="latched">latched — reliable, transient local, depth 1</option>
+            <option value="custom">custom</option>
+        </select>
+    </div>
+    <div class="form-row ros2-qos-custom">
+        <label for="node-input-qosReliability"></label>
+        <select id="node-input-qosReliability" style="width: 26%">
+            <option value="reliable">reliable</option>
+            <option value="best_effort">best effort</option>
+        </select>
+        <select id="node-input-qosDurability" style="width: 28%">
+            <option value="volatile">volatile</option>
+            <option value="transient_local">transient local</option>
+        </select>
+        depth <input type="text" id="node-input-qosDepth" style="width: 50px">
     </div>
     <div class="form-row">
         <label for="node-input-validation"><i class="fa fa-check-square-o"></i> Validate</label>
@@ -96,12 +132,25 @@ RED.nodes.registerType('ros2-publish', {
         <dt>ros <span class="property-type">object</span></dt>
         <dd>the input message is passed on after publishing, with <code>msg.ros = {topic, type}</code>.</dd>
     </dl>
+    <h3>Properties</h3>
+    <dl class="message-properties">
+        <dt>Stamp</dt>
+        <dd>fills every <code>std_msgs/Header</code> whose <code>stamp</code> is missing or zero, also in
+            nested messages and arrays — with the system time, or with ROS time from <code>/clock</code>
+            when a simulator runs with <code>use_sim_time</code>. Stamps you set yourself are kept.</dd>
+        <dt>QoS</dt>
+        <dd><b>auto</b> leaves the choice to rosbridge. The presets and <b>custom</b> set reliability,
+            durability and depth explicitly — match them to the other side (<code>ros2 topic info -v</code>).
+            rosbridge creates one ROS publisher per topic for all its clients, so the QoS of the first one
+            wins until nobody uses the topic through rosbridge any more. Needs a rosbridge that understands
+            the <code>qos</code> field (current releases for Humble and later); older ones ignore it.</dd>
+    </dl>
     <h3>Details</h3>
     <p><b>Type</b>: empty means auto-detect from the topic list. When nothing advertises the topic yet,
        set the type (e.g. <code>geometry_msgs/msg/Twist</code>) or pass <code>msg.rosType</code>.
        The <i>template</i> button shows a complete example message and copies it to the clipboard.</p>
     <p><b>Validation</b> checks the payload against the type definition from rosapi: field names,
-       JSON types, integer ranges and fixed array lengths (<code>uint8[]</code> may be a base64 string).
+       JSON types, integer ranges and fixed array lengths (<code>uint8[]</code> may be a <code>Buffer</code> or a base64 string; Buffers are sent as base64).
        <code>strict</code> blocks invalid messages and reports them via <code>done(err)</code>, so a Catch
        node sees them; <code>warn</code> logs and publishes; <code>off</code> skips all checks.</p>
     <p>Errors (not connected, unknown type, invalid message) never pass silently: the status turns red
