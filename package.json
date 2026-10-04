@@ -1,6 +1,6 @@
 {
   "name": "node-red-contrib-ros2-suite",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Node-RED nodes for ROS 2 over rosbridge — subscribe, publish, services and actions (client and server), parameters, TF and discovery. No local ROS install, no rclnodejs.",
   "keywords": [
     "node-red",
